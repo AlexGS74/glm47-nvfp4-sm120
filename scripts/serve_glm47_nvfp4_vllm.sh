@@ -106,6 +106,7 @@ exec "${VLLM_PYTHON}" -m vllm.entrypoints.openai.api_server \
   --reasoning-parser glm45 \
   --enable-auto-tool-choice \
   --tool-call-parser glm47 \
-  --enable-log-requests \
+  --disable-log-requests \
+  --enable-log-outputs \
   --trust-remote-code \
   "$@"
