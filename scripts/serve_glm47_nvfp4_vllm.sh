@@ -8,6 +8,8 @@ set -euo pipefail
 # Default: uv tool venv for vllm 0.15.1
 # Install: uv tool install vllm==0.15.1
 VLLM_PYTHON=${VLLM_PYTHON:-${HOME}/.local/share/uv/tools/vllm/bin/python}
+# Ensure vllm venv bin (ninja, etc.) is on PATH for flashinfer JIT compilation
+export PATH="$(dirname "${VLLM_PYTHON}"):${PATH}"
 
 # ── Model / serving ──────────────────────────────────────────────────────────
 # Use local HF cache by default to avoid re-downloading.
