@@ -75,6 +75,7 @@ exec "${VLLM_PYTHON}" -m vllm.entrypoints.openai.api_server \
   --gpu-memory-utilization "${GPU_MEM_UTIL}" \
   --served-model-name "${SERVED_MODEL_NAME}" \
   --chat-template "${MODEL_PATH}/chat_template.jinja" \
+  --reasoning-parser glm45 \
   --enable-auto-tool-choice \
   --tool-call-parser glm47 \
   --trust-remote-code \
