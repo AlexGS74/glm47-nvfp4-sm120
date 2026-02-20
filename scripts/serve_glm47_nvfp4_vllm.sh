@@ -23,6 +23,8 @@ QUANTIZATION=${QUANTIZATION:-modelopt_fp4}
 ATTENTION_BACKEND=${ATTENTION_BACKEND:-TRITON_ATTN}
 # 0.80 leaves ~19 GiB free per GPU — enough for CUDA graph capture + sampler warmup
 GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.80}
+# Force VLLM_CUTLASS MoE backend — FLASHINFER_CUTLASS returns zeros on SM120 (#2577)
+export VLLM_USE_FLASHINFER_MOE_FP4=${VLLM_USE_FLASHINFER_MOE_FP4:-0}
 
 # ─────────────────────────────────────────────────────────────────────────────
 
