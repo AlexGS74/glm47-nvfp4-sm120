@@ -252,20 +252,74 @@ with session state:
 
 | Scenario | Observed hit rate |
 |----------|-------------------|
-| Warm cache, single session continuing | 83–85% |
+| Warm cache, proxy running, single session continuing | 80–85% |
+| Without proxy (raw Claude Code → vLLM) | 22–40% — see below |
 | After server restart, first requests | ~0% (cold) |
-| Multiple concurrent sessions, fresh start | 29–37% |
 
-**Why 29% with multiple sessions**: Claude Code's system prompt is ~99k tokens and is shared
-across sessions — that's the cacheable prefix. Each session's conversation history is unique and
-accumulates as the session progresses. If sessions are early in their history, the
-shared-prefix fraction is high; if conversations are long, the unique tail dominates and
-per-session hit rates diverge.
+---
 
-**This is expected behaviour, not a configuration problem.** vLLM's automatic prefix cache
-(APC) is already active and does the right thing. Hit rate climbs back toward 80%+ once the
-system prompt is warm and sessions are reusing the same prefix. No tuning knobs improve it
-beyond keeping the server running continuously and reusing sessions.
+### Claude Code cache busters (2026-02-21 audit)
+
+Diagnosed using the normalizing proxy in `proxy/` with `--dump-dir` session
+diffing. Three distinct cache busters were identified, in order of impact:
+
+#### Cache buster 1 — Per-request billing nonce `cch=` (critical)
+
+Claude Code injects a billing tracking header as the **first block** of the
+system prompt on every single request:
+
+```
+x-anthropic-billing-header: cc_version=2.1.50.f15; cc_entrypoint=cli; cch=27acd;
+```
+
+The `cch=` value is a per-request nonce that changes every time. Because it
+sits at token position 0 — before the system instructions, before the tools —
+it invalidates the **entire KV cache** on every request. Without a fix, prefix
+cache hit rate is 22–40% regardless of how long the session has been running.
+
+**Fix (in proxy):** Strip the `x-anthropic-billing-header:` block from the
+system prompt before forwarding. This is Anthropic's internal billing
+telemetry and has no effect on model behaviour for a local instance.
+
+This is a Claude Code client issue worth reporting upstream:
+https://github.com/anthropics/claude-code/issues — the nonce could be moved
+to an HTTP header instead of the system prompt body, which would leave the
+cacheable prefix intact.
+
+#### Cache buster 2 — MCP tool reordering
+
+With 80+ tool definitions (built-ins + MCP servers), the tool block is large
+and injected at position 0 of the formatted GLM-4.7 prompt. MCP servers
+reconnect and return tools in arbitrary order, so the tool block hash changes
+between requests even when the content is identical.
+
+**Fix (in proxy):** Sort tools alphabetically by name before forwarding.
+
+#### Cache buster 3 — `currentDate` injection (daily)
+
+Claude Code appends `Today's date is YYYY-MM-DD.` to MEMORY.md content before
+injecting it into `<system-reminder>` blocks in user messages. Changes at
+midnight.
+
+**Fix (in proxy):** `--strip-date` flag. Optional — omit if date awareness
+matters.
+
+---
+
+### Proxy
+
+`proxy/` contains a FastAPI normalizing proxy (`uv run`, no install) that
+applies all three fixes before forwarding to vLLM. With the proxy running,
+observed hit rate returns to 80–85% on warm sessions.
+
+```bash
+bash proxy/serve_proxy.sh   # binds 0.0.0.0:30001, forwards to localhost:30000
+```
+
+Point Claude Code at the proxy port instead of vLLM directly:
+```bash
+ANTHROPIC_BASE_URL=http://localhost:30001 claude ...
+```
 
 ---
 
