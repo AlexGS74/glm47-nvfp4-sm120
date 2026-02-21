@@ -49,6 +49,14 @@ export VLLM_LOGGING_LEVEL=${LOG_LEVEL:-INFO}
 export CUDA_DEVICE_MAX_CONNECTIONS=${CUDA_DEVICE_MAX_CONNECTIONS:-1}
 export NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE:-0}
 
+# ── GPU power limit (thermal management) ─────────────────────────────────────
+# RTX PRO 6000 Max-Q hits 89–91°C at full 300W during inference.
+# 250W keeps temps ~80–85°C with negligible decode performance impact
+# (decode is memory-bandwidth bound, not compute bound).
+# Requires: sudo visudo -f /etc/sudoers.d/nvidia-power
+#   alex ALL=(ALL) NOPASSWD: /usr/bin/nvidia-smi -pl *
+GPU_POWER_LIMIT=${GPU_POWER_LIMIT:-250}
+
 # ─────────────────────────────────────────────────────────────────────────────
 
 if [[ ! -x "${VLLM_BIN}" ]]; then
@@ -78,6 +86,14 @@ Environment variables:
   LOG_LEVEL           (default: INFO)          # set to DEBUG for verbose output
 EOF
   exit 0
+fi
+
+if sudo -n nvidia-smi -pl "${GPU_POWER_LIMIT}" -i 0,1,2,3 2>/dev/null; then
+  echo "GPU power limit set to ${GPU_POWER_LIMIT}W"
+else
+  echo "WARNING: could not set GPU power limit (sudo not configured?)" >&2
+  echo "  Run: sudo visudo -f /etc/sudoers.d/nvidia-power" >&2
+  echo "  Add: ${USER} ALL=(ALL) NOPASSWD: /usr/bin/nvidia-smi -pl *" >&2
 fi
 
 echo "vLLM:        $("${VLLM_BIN}" --version 2>/dev/null || echo unknown)"
