@@ -50,6 +50,9 @@ STRIP_DATE=1 bash proxy/serve_proxy.sh
 # Verbose (log every normalization applied)
 VERBOSE=1 bash proxy/serve_proxy.sh
 
+# Enable session prompt diffing (see Dump Mode below)
+DUMP_DIR=~/mllm/prompt-diffs bash proxy/serve_proxy.sh
+
 # Custom upstream / port
 UPSTREAM=http://localhost:30000 PORT=30001 bash proxy/serve_proxy.sh
 ```
@@ -58,6 +61,54 @@ Or directly:
 ```bash
 uv run proxy/proxy.py --help
 ```
+
+## Dump Mode (`--dump-dir`)
+
+Enables session-aware prompt capture and diffing — useful for identifying
+remaining cache busters after normalization.
+
+```bash
+DUMP_DIR=~/mllm/prompt-diffs bash proxy/serve_proxy.sh
+```
+
+**Session ID** = first 12 hex chars of SHA-256(system prompt text). Stable
+within a Claude Code session; changes between sessions.
+
+**Output layout** under `DUMP_DIR/<session_id>/`:
+
+```
+turn_000.json    # full normalized request body (turn 0)
+turn_001.diff    # unified diff: turn 000 → turn 001
+turn_002.diff    # unified diff: turn 001 → turn 002
+...
+index.txt        # one-line summary per turn (timestamp, +/- lines, msg count)
+```
+
+**What the diff shows:** each request is rendered as labelled sections before
+diffing, so changes are easy to spot:
+
+```diff
+ [tools] (83 total)
+ # atlassianAddComment, atlassianAddWatcher, ...
+
+-[message 4 / user]
+-<system-reminder>
+-Today's date is 2026-02-20.         ← cache buster: date changed
++[message 4 / user]
++<system-reminder>
++Today's date is 2026-02-21.
+```
+
+**Reading the index:**
+```
+turn 000  10:31:02  FULL  3 msgs  83 tools  412.3 KB
+turn 001  10:32:18  +47/-3 lines  5 msgs  83 tools
+turn 002  10:33:05  +892/-0 lines  7 msgs  83 tools   ← large file read
+```
+
+A large `+` line count on a turn = new content added to context (file reads,
+long tool outputs). A non-zero `-` count on the tools section = tool list
+changed = cache busted from position 0.
 
 ## Configure Claude Code
 

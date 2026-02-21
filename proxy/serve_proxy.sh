@@ -7,7 +7,8 @@ set -euo pipefail
 #
 # Usage:
 #   bash proxy/serve_proxy.sh
-#   STRIP_DATE=1 bash proxy/serve_proxy.sh   # also strip daily date injection
+#   STRIP_DATE=1 bash proxy/serve_proxy.sh              # also strip daily date injection
+#   DUMP_DIR=~/mllm/prompt-diffs bash proxy/serve_proxy.sh  # enable per-session prompt diffing
 #
 # Then point Claude Code at port 30001:
 #   ANTHROPIC_BASE_URL=http://localhost:30001 claude ...
@@ -18,12 +19,14 @@ HOST=${HOST:-127.0.0.1}
 PORT=${PORT:-30001}
 STRIP_DATE=${STRIP_DATE:-0}
 VERBOSE=${VERBOSE:-0}
+DUMP_DIR=${DUMP_DIR:-}
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 EXTRA_FLAGS=""
 [[ "${STRIP_DATE}" == "1" ]] && EXTRA_FLAGS="${EXTRA_FLAGS} --strip-date"
 [[ "${VERBOSE}"     == "1" ]] && EXTRA_FLAGS="${EXTRA_FLAGS} --verbose"
+[[ -n "${DUMP_DIR}"       ]] && EXTRA_FLAGS="${EXTRA_FLAGS} --dump-dir ${DUMP_DIR}"
 
 echo "proxy → ${UPSTREAM}  listening on ${HOST}:${PORT}"
 
