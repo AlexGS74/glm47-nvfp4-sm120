@@ -144,7 +144,38 @@ def normalize(body: dict) -> tuple[dict, list[str]]:
                 f" → [{', '.join(sorted_names[:4])}{'...' if len(sorted_names) > 4 else ''}]"
             )
 
-    # 2. Strip currentDate injection from user message content
+    # 2. Strip cache_control fields from messages and system blocks.
+    #    Claude Code uses Anthropic's prompt caching API — it attaches
+    #    cache_control: {type: ephemeral} to the latest messages, then removes
+    #    it from those messages on the next turn (the marker moves forward).
+    #    For vLLM these fields are meaningless, but the changed JSON content
+    #    modifies the hash of every affected message → cache miss for everything
+    #    from that point onward. Strip them so message content is stable.
+    if isinstance(body.get("system"), list):
+        stripped = 0
+        for block in body["system"]:
+            if isinstance(block, dict) and "cache_control" in block:
+                del block["cache_control"]
+                stripped += 1
+        if stripped:
+            changes.append(f"stripped cache_control from {stripped} system block(s)")
+
+    if isinstance(body.get("messages"), list):
+        stripped = 0
+        for msg in body["messages"]:
+            content = msg.get("content")
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and "cache_control" in block:
+                        del block["cache_control"]
+                        stripped += 1
+            if "cache_control" in msg:
+                del msg["cache_control"]
+                stripped += 1
+        if stripped:
+            changes.append(f"stripped cache_control from {stripped} message field(s)")
+
+    # 4. Strip currentDate injection from user message content
     if STRIP_DATE and isinstance(body.get("messages"), list):
         for msg in body["messages"]:
             if msg.get("role") != "user":
