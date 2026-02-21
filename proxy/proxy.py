@@ -79,6 +79,12 @@ DUMP_DIR: Path | None = None
 #   Today's date is 2026-02-21.\n
 _DATE_RE = re.compile(r"Today's date is \d{4}-\d{2}-\d{2}\.\n?")
 
+# Matches the per-request billing nonce block injected by Claude Code, e.g.:
+#   x-anthropic-billing-header: cc_version=2.1.50.f15; cc_entrypoint=cli; cch=27acd;
+# This changes on every request and lives at position 0 of the system prompt,
+# busting the entire KV cache. Meaningless to a local model — always stripped.
+_BILLING_RE = re.compile(r"x-anthropic-billing-header:[^\n]*\n?")
+
 # Hop-by-hop headers that must not be forwarded from upstream response
 _HOP_BY_HOP = frozenset(
     [
@@ -104,6 +110,28 @@ app = FastAPI()
 def normalize(body: dict) -> tuple[dict, list[str]]:
     """Apply cache-stabilizing normalizations. Returns (body, list of changes)."""
     changes: list[str] = []
+
+    # 0. Strip per-request billing nonce from system prompt.
+    #    Claude Code injects "x-anthropic-billing-header: ...cch=<nonce>;" as
+    #    the first system block. It changes every request and lives at token
+    #    position 0 — busts the entire KV cache unconditionally. Strip it.
+    system = body.get("system")
+    if isinstance(system, list):
+        filtered = []
+        for block in system:
+            if isinstance(block, dict) and isinstance(block.get("text"), str):
+                cleaned = _BILLING_RE.sub("", block["text"]).strip()
+                if cleaned:
+                    block = {**block, "text": cleaned}
+                    filtered.append(block)
+                else:
+                    changes.append("stripped billing-header system block")
+            else:
+                filtered.append(block)
+        body["system"] = filtered
+    elif isinstance(system, str) and _BILLING_RE.search(system):
+        body["system"] = _BILLING_RE.sub("", system).strip()
+        changes.append("stripped billing-header from system string")
 
     # 1. Sort tools by name
     if isinstance(body.get("tools"), list) and body["tools"]:
