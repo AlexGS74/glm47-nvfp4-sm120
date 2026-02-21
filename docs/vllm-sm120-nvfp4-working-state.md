@@ -309,10 +309,11 @@ After applying all three proxy fixes, session diffs show only `+N/-0` lines
 existing messages. Sessions that previously created a new unique hash on every
 request now maintain a stable session ID across all turns.
 
-Observed hit rate post-proxy: **59–85%** depending on session maturity:
+Observed hit rate post-proxy: **76%+ server-wide average** (vs 22–40% without proxy),
+climbing higher on long-running sessions:
 - Long-running interactive sessions (50+ msgs): ~85–90%
 - Sub-agents with distinct system prompts: starts cold, climbs per-turn
-- Server-wide average across mixed sessions: ~59%
+- Server-wide average across mixed concurrent sessions: ~76%
 
 The remaining misses are genuine — different specialized sub-agents (e.g.,
 CODIFY Decide/Invite/Forward phases) have genuinely different system prompts
