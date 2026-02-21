@@ -15,11 +15,13 @@ import argparse
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from patches import vllm_glm4_moe
+from patches import vllm_glm4_moe, vllm_glm47_tool_parser, vllm_glm47_chat_template
 
 
 PATCHES = [
     ("vLLM glm4_moe.py — skip missing k_scale/v_scale", vllm_glm4_moe),
+    ("vLLM glm47_moe_tool_parser.py — extract tool calls from <think> blocks", vllm_glm47_tool_parser),
+    ("GLM-4.7 chat_template.jinja — instruct model to place tool calls after </think>", vllm_glm47_chat_template),
 ]
 
 
