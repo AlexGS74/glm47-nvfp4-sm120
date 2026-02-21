@@ -15,7 +15,7 @@ set -euo pipefail
 # or update the glm47 bash function in ~/.bashrc
 
 UPSTREAM=${UPSTREAM:-http://localhost:30000}
-HOST=${HOST:-127.0.0.1}
+HOST=${HOST:-0.0.0.0}
 PORT=${PORT:-30001}
 STRIP_DATE=${STRIP_DATE:-0}
 VERBOSE=${VERBOSE:-0}
