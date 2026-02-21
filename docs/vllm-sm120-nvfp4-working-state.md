@@ -187,18 +187,62 @@ elif origin_chunk.choices[0].delta.content is not None:
 
 ---
 
-## Performance (observed, prefix cache warm)
+## Performance
 
-From logs during normal Claude Code usage (99k token system prompt):
+### Benchmarked throughput (thinking disabled, cold prefix cache)
+
+Measured with concurrent async requests, `chat_template_kwargs: {enable_thinking: false}`,
+`stream_interval=1`, `max_num_batched_tokens=16384`, `CUDA_DEVICE_MAX_CONNECTIONS=1`.
+
+| Concurrency | System tok/s | Per-req tok/s | TTFT |
+|-------------|-------------|---------------|------|
+| 1 | 48 | 48 | 49 ms |
+| 2 | 62 | 45 avg | 46 ms |
+| 4 | 118 | 36 avg | 68 ms |
+| 8 | 203 | 31 avg | 126 ms |
+
+System throughput scales well — MoE batching amortises expert dispatch across requests.
+Hasn't saturated at C=8; higher concurrency will continue to improve system throughput at the
+cost of per-request speed.
+
+**Single-request decode:** ~52 tok/s measured via streaming ITL (with thinking enabled,
+TTFT 2.6 s includes thinking phase). GPU memory bandwidth utilisation ~90% of theoretical
+ceiling (22 GB weights/GPU at 1.28 TB/s → ~58 tok/s max). Not PCIe bottlenecked.
+
+### Interconnect
+
+All 4 GPUs are PCIe-only (`NODE` topology, no NVLink). PCIe Gen 5 x16 per GPU.
+`NCCL_P2P_DISABLE` makes no measurable difference — `CUDA_DEVICE_MAX_CONNECTIONS=1`
+already serialises the connections. P2P vs SHM path is a wash for the small (~14 KB)
+AllReduce messages produced during decode.
+
+### Thinking mode impact
+
+GLM-4.7 enables chain-of-thought by default (`--reasoning-parser glm45`). For throughput
+benchmarks always pass `chat_template_kwargs: {enable_thinking: false}` or results will
+be dominated by silent thinking tokens (TTFT 2–3 s, visible tok/s ~4× lower).
+
+### Flags that made a measurable difference
+
+| Change | Effect |
+|--------|--------|
+| `--max-num-batched-tokens 16384` | +72% at C=4, +126% at C=8 vs default |
+| `CUDA_DEVICE_MAX_CONNECTIONS=1` | Marginal at C=1, helps at high concurrency |
+| Removing `--enable-log-requests/outputs` | ~5–10% across all concurrency levels |
+| `--stream-interval 5` | **Do not use** — causes stalls when `include_usage` is set; no throughput benefit |
+| `NCCL_P2P_DISABLE=1` | No measurable effect |
+| `--num-scheduler-steps` | Not available in vLLM 0.15.1 V1 engine (V1 async scheduling is equivalent and on by default) |
+| MTP speculative decoding | 0% acceptance — neither NVFP4 checkpoint (Salyut1 or Tengyunw) includes MTP draft head weights |
+
+### Logs during Claude Code usage (prefix cache warm)
 
 | Metric | Observed |
 |--------|----------|
 | Avg prompt throughput | 3,900–7,500 tok/s |
-| Avg generation throughput | 15–33 tok/s |
+| Avg generation throughput | 15–33 tok/s (rolling avg includes idle time; real decode ~52 tok/s) |
 | Prefix cache hit rate | 83–85% |
-| GPU KV cache usage | ~6–7% |
 
-**Note:** Prompt throughput is inflated by prefix caching — the 83–85% hit rate means most of the prompt tokens are served from cache, not re-computed. Cold-start (fresh cache) prefill TPS will be significantly lower. For real throughput benchmarks use `python -m vllm.benchmarks.benchmark_throughput` with prefix caching disabled.
+Prompt throughput is inflated by prefix caching — 83–85% of tokens are served from cache.
 
 ---
 

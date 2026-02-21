@@ -23,7 +23,7 @@ MAX_MODEL_LEN=${MAX_MODEL_LEN:-200000}   # model max: 202752; Claude Code needs 
 MAX_NUM_SEQS=${MAX_NUM_SEQS:-32}
 SWAP_SPACE=${SWAP_SPACE:-16}
 MAX_NUM_BATCHED_TOKENS=${MAX_NUM_BATCHED_TOKENS:-16384}
-STREAM_INTERVAL=${STREAM_INTERVAL:-1}
+STREAM_INTERVAL=${STREAM_INTERVAL:-1}   # keep at 1 for smooth interactive streaming; interval=5 causes stalls with include_usage
 # 0.80 leaves ~19 GiB free per GPU — enough for CUDA graph capture + sampler warmup
 GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.80}
 # MTP speculative decoding — set to 0 to disable
@@ -118,7 +118,7 @@ exec "${VLLM_BIN}" serve "${MODEL_PATH}" \
   --tool-call-parser glm47 \
   --reasoning-parser glm45 \
   --enable-auto-tool-choice \
-  --enable-log-requests \
-  --enable-log-outputs \
+  # --enable-log-requests \   # uncomment to log full request/response text (adds overhead)
+  # --enable-log-outputs \
   --trust-remote-code \
   "$@"
