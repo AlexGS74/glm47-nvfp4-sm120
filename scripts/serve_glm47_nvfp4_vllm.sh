@@ -17,7 +17,7 @@ export PATH="$(dirname "${VLLM_PYTHON}"):${PATH}"
 MODEL_PATH=${MODEL_PATH:-${HOME}/.cache/huggingface/hub/models--Salyut1--GLM-4.7-NVFP4/snapshots/531df318dbe2877b24881f6e15024c7f945e7048}
 export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 HOST=${HOST:-0.0.0.0}
-PORT=${PORT:-30000}
+PORT=${PORT:-30001}
 TP=${TP:-4}
 DTYPE=${DTYPE:-bfloat16}
 QUANTIZATION=${QUANTIZATION:-modelopt_fp4}
@@ -25,7 +25,7 @@ QUANTIZATION=${QUANTIZATION:-modelopt_fp4}
 ATTENTION_BACKEND=${ATTENTION_BACKEND:-TRITON_ATTN}
 # 0.80 leaves ~19 GiB free per GPU — enough for CUDA graph capture + sampler warmup
 GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.80}
-MAX_MODEL_LEN=${MAX_MODEL_LEN:-131072}   # model max: 202752; reduce if KV cache OOMs
+MAX_MODEL_LEN=${MAX_MODEL_LEN:-200000}   # model max: 202752; Claude Code needs ~99k for system prompt alone
 MAX_NUM_SEQS=${MAX_NUM_SEQS:-32}
 SWAP_SPACE=${SWAP_SPACE:-16}
 SERVED_MODEL_NAME=${SERVED_MODEL_NAME:-glm4.7}

@@ -1,0 +1,15 @@
+model_list:
+  - model_name: glm4.7
+    litellm_params:
+      model: openai/glm4.7
+      api_base: http://localhost:30001/v1
+      api_key: x
+  # catch-all: forward any model name Claude Code might send
+  - model_name: "*"
+    litellm_params:
+      model: openai/glm4.7
+      api_base: http://localhost:30001/v1
+      api_key: x
+
+general_settings:
+  master_key: x
