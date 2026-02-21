@@ -414,3 +414,61 @@ The Tengyunw patch suggests their NVFP4 quantization produces weight scales in a
 - Slightly different ModelOpt version/modelopt_nvfp4 parameters
 
 Both models (`Salyut1/GLM-4.7-NVFP4` and `Tengyunw/GLM-4.7-NVFP4`) are NVFP4 but may have internal format differences affecting how they're loaded and validated.
+
+---
+
+## FlashInfer Issue Tracking
+
+The FlashInfer project has numerous open issues and PRs related to SM120/Blackwell FP4 support. Below are the most relevant ones as of 2026-02-21:
+
+### Critical SM120/FP4 Issues
+
+| Issue/PR | Title | State | Date | Relevance |
+|----------|-------|-------|------|-----------|
+| [#2577](https://github.com/flashinfer-ai/flashinfer/issues/2577) | NVFP4 mm_fp4 GEMM broken on SM120 (RTX PRO 6000 Blackwell) - all backends fail | open | 2026-02-18 | **HIGHEST** - Our exact hardware, CUTLASS zeros, TRTLLM crashes |
+| [#2598](https://github.com/flashinfer-ai/flashinfer/pull/2598) | feat: add CuTe DSL flash attention backend for SM120 GPUs | open (PR) | 2026-02-20 | Adds CuTe DSL attention for SM120 |
+| [#2589](https://github.com/flashinfer-ai/flashinfer/issues/2589) | FlashInfer API for sparsity updated cubins in nvfp4 moe | open | 2026-02-19 | NVFP4 MoE cubin API |
+| [#2561](https://github.com/flashinfer-ai/flashinfer/pull/2561) | feat: SM120 standard attention kernels + CuTe DSL backend | open (PR) | 2026-02-13 | SM120 attention kernels |
+| [#2555](https://github.com/flashinfer-ai/flashinfer/issues/2555) | SM120 attention kernels exist but are blocked by wiring issues | open | 2026-02-13 | Wiring bugs prevent SM120 usage |
+| [#2553](https://github.com/flashinfer-ai/flashinfer/pull/2553) | filter out runtime kernels for fp4 gemm | open (PR) | 2026-02-13 | FP4 GEMM runtime kernel filtering |
+| [#2545](https://github.com/flashinfer-ai/flashinfer/pull/2545) | Draft - Dynamic shape for cuDNN FP4 GEMM to reduce graph build overhead | open (PR) | 2026-02-12 | cuDNN FP4 improvements |
+| [#2540](https://github.com/flashinfer-ai/flashinfer/pull/2540) | feat: cute dsl mmfp4 for blackwell | merged | 2026-02-20 | CuTe DSL MMFP4 backend (SM100) |
+| [#2520](https://github.com/flashinfer-ai/flashinfer/pull/2520) | Support NVFP4 KV cache decode on SM120 | open (PR) | 2026-02-08 | SM120 NVFP4 KV cache |
+| [#2517](https://github.com/flashinfer-ai/flashinfer/pull/2517) | Improve small size performance in cutedsl fp4 | open (PR) | 2026-02-07 | CuTe DSL FP4 optimization |
+| [#2496](https://github.com/flashinfer-ai/flashinfer/issues/2496) | [Perf] mxfp4 quantize kernel is slow | open | 2026-02-04 | MXFP4 performance |
+| [#2466](https://github.com/flashinfer-ai/flashinfer/issues/2466) | Integrate cuteDSL fp4 dense gemm into flashinfer | open | 2026-02-02 | CuTe DSL FP4 integration |
+| [#2443](https://github.com/flashinfer-ai/flashinfer/pull/2443) | Add cute-dsl backends to mxfp[8,4]_quantization | open (PR) | 2026-01-30 | MXFP8/4 quantization integration |
+| [#2402](https://github.com/flashinfer-ai/flashinfer/pull/2402) | feat: Add sparsity cubins for sm90 | merged | 2025-12-24 | Sparsity support (added to current) |
+
+### Notable Issues from 2025
+
+| Issue/PR | Title | State | Date | Relevance |
+|----------|-------|-------|------|-----------|
+| [#2373](https://github.com/flashinfer-ai/flashinfer/issues/2373) | FI trtllm_fp4_block_scale_moe interface core dump and output mismatch | open | 2026-01-19 | NVFP4 MoE core dumps |
+| [#2294](https://github.com/flashinfer-ai/flashinfer/issues/2294) | [Feature Request] Support NVFP4 KV Cache Kernel on SM120 through XQA | open | 2026-01-06 | SM120 NVFP4 attention |
+| [#2263](https://github.com/flashinfer-ai/flashinfer/pull/2263) | feat: Add FP8/NVFP4 quant fusion for MNNVL Allreduce | open (PR) | 2025-12-24 | FP8/NVFP4 fusion |
+| [#2166](https://github.com/flashinfer-ai/flashinfer/issues/2166) | sm120 rtx 6000 | open | 2025-12-03 | Early SM120 RTX 6000 tracking |
+| [#2077](https://github.com/flashinfer-ai/flashinfer/issues/2077) | MoE autotune print a lot failed kernel on SM120 | open | 2025-11-11 | SM120 MoE kernels failing |
+| [#1741](https://github.com/flashinfer-ai/flashinfer/issues/1741) | mm_fp4 regression (need 0.2s cpu time per run) | open | 2025-09-20 | FP4 performance regression |
+| [#1632](https://github.com/flashinfer-ai/flashinfer/issues/1632) | CuteDSL grouped gemm kernel write nan into non-masked position | open | 2025-09-03 | CuteDSL FP4 NaN |
+
+### Summary of FlashInfer Status
+
+**Active Development:**
+- Multiple PRs adding SM120 support (#2561, #2598, #2520)
+- CuTe DSL MMFP4 backend recently merged (#2540)
+- NVFP4 attention and KV cache improvements in progress
+
+**Known Blockers (for us):**
+- Issue #2577 is the definitive blocker - all FP4 GEMM backends fail on SM120
+- PR #2555 documents that SM120 kernels exist but aren't wired into the runtime
+- CUTLASS FP4 returns zeros (NaN propagation) as tracked in SGLang #18954 / flashinfer #2577
+- TRTLLM downloads SM100-only cubins that cannot run on SM120
+
+**What needs to happen:**
+1. Fix CUTLASS FP4 to return correct values on SM120 (tracked in #2577)
+2. Wire existing SM120 kernels into attention/MLA backends (#2555)
+3. Publish SM120 cubins for TRTLLM NVFP4 MoE path
+4. Integrate and test CuTe DSL MMFP4 for SM120 (currently SM100-only per #2540 description)
+
+**No merged fixes for SM120 NVFP4 + GEMM** as of 2026-02-21. Most SM120 work is in draft or open PR states.

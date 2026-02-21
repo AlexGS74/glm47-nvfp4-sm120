@@ -128,3 +128,11 @@ The patch to `glm4_moe.py` lives inside the vLLM install and is lost on reinstal
 
 - [`docs/vllm-sm120-nvfp4-working-state.md`](docs/vllm-sm120-nvfp4-working-state.md) — full vLLM working state, errors encountered, startup sequence
 - [`docs/sm120-blackwell-fp4-fixes.md`](docs/sm120-blackwell-fp4-fixes.md) — SGLang investigation report, flashinfer regression history, upstream issue tracking
+
+---
+
+## Status Notes (2026-02-21)
+
+The primary path to running GLM-4.7-NVFP4 on SM120 today is via **vLLM 0.15.1** with the included patches — this is confirmed working with tool calling via the Anthropic API.
+
+**SGLang** has an upstream fix in commit `33c33a7de` ([#18546](https://github.com/sgl-project/sglang/pull/18546)) that addresses KV cache scale loading that previously required patching. However, the fundamental SM120 FP4 MoE backend issue remains unresolved in SGLang (no working backend: triton gives garbage, cutlass returns zeros, trtllm uses SM100-only cubins). See `docs/sm120-blackwell-fp4-fixes.md` for complete details.

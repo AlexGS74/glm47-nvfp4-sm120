@@ -22,6 +22,8 @@ SERVED_MODEL_NAME=${SERVED_MODEL_NAME:-glm4.7}
 MAX_MODEL_LEN=${MAX_MODEL_LEN:-200000}   # model max: 202752; Claude Code needs ~99k for system prompt
 MAX_NUM_SEQS=${MAX_NUM_SEQS:-32}
 SWAP_SPACE=${SWAP_SPACE:-16}
+MAX_NUM_BATCHED_TOKENS=${MAX_NUM_BATCHED_TOKENS:-16384}
+STREAM_INTERVAL=${STREAM_INTERVAL:-1}
 # 0.80 leaves ~19 GiB free per GPU — enough for CUDA graph capture + sampler warmup
 GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.80}
 # MTP speculative decoding — set to 0 to disable
@@ -39,6 +41,13 @@ export VLLM_USE_FLASHINFER_MOE_FP16=${VLLM_USE_FLASHINFER_MOE_FP16:-1}
 export VLLM_USE_FLASHINFER_SAMPLER=${VLLM_USE_FLASHINFER_SAMPLER:-0}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
 export VLLM_LOGGING_LEVEL=${LOG_LEVEL:-INFO}
+# PCIe-only multi-GPU comm tuning.
+# CUDA_DEVICE_MAX_CONNECTIONS=1: serializes P2P connections, reduces contention.
+# NCCL_P2P_DISABLE=1: forces NCCL through host SHM instead of direct P2P.
+#   For decode (small ~14KB AllReduces), SHM latency can beat P2P negotiation overhead.
+#   Try both 0 and 1 to benchmark — P2P wins for large prefill, SHM may win for decode.
+export CUDA_DEVICE_MAX_CONNECTIONS=${CUDA_DEVICE_MAX_CONNECTIONS:-1}
+export NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE:-0}
 
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -101,6 +110,8 @@ exec "${VLLM_BIN}" serve "${MODEL_PATH}" \
   --gpu-memory-utilization "${GPU_MEM_UTIL}" \
   --max-model-len "${MAX_MODEL_LEN}" \
   --max-num-seqs "${MAX_NUM_SEQS}" \
+  --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS}" \
+  --stream-interval "${STREAM_INTERVAL}" \
   --swap-space "${SWAP_SPACE}" \
   ${SPEC_FLAGS} \
   --chat-template "${MODEL_PATH}/chat_template.jinja" \
