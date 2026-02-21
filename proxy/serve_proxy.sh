@@ -19,7 +19,7 @@ HOST=${HOST:-0.0.0.0}
 PORT=${PORT:-30001}
 STRIP_DATE=${STRIP_DATE:-0}
 VERBOSE=${VERBOSE:-0}
-DUMP_DIR=${DUMP_DIR:-}
+DUMP_DIR=${DUMP_DIR:-${HOME}/mllm/prompt-diffs}
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
