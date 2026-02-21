@@ -2,7 +2,7 @@
 
 Patches and serve scripts to run [`Salyut1/GLM-4.7-NVFP4`](https://huggingface.co/Salyut1/GLM-4.7-NVFP4) on **SM120 (RTX PRO 6000 Blackwell, RTX 5090)** hardware.
 
-**Working as of 2026-02-20 with vLLM 0.15.1.**
+**Working as of 2026-02-21 with vLLM 0.15.1. Tool calling confirmed working with Claude Code via Anthropic `/v1/messages` endpoint.**
 
 SGLang is blocked by a checkpoint format incompatibility in v0.5.6/v0.5.7 — see `docs/sm120-blackwell-fp4-fixes.md` for details.
 
@@ -79,6 +79,25 @@ curl http://localhost:30000/v1/chat/completions \
 ### `patches/vllm_glm4_moe.py` — skip missing k_scale/v_scale
 
 `Salyut1/GLM-4.7-NVFP4` doesn't contain FP8 KV-cache scale tensors. vLLM 0.15.1 crashes with `KeyError: 'layers.N.self_attn.qkv_proj.k_scale'` when loading the checkpoint. The patch adds a guard in two places in the weight loader to skip these missing tensors.
+
+---
+
+## What the patches fix (continued)
+
+### `patches/vllm_anthropic_serving.py` — Anthropic endpoint tool call bugs
+
+Four bugs in `vllm/entrypoints/anthropic/serving.py` that cause tool calls to be silently dropped when using the `/v1/messages` Anthropic endpoint:
+
+1. **Non-streaming NoneType** — `message.tool_calls` is `None` with no tools → `TypeError`. Fix: `or []` guard.
+2. **Streaming NoneType** — `delta.tool_calls` is `None` for non-tool chunks → `TypeError`. Fix: `None` guard before `len()`.
+3. **Single-chunk args not emitted** — vLLM emits id + args in one chunk; only `content_block_start` was sent, not `content_block_delta`. Fix: emit delta immediately when args are present.
+4. **Empty `delta.content` bypasses tool calls** — vLLM sends `delta.content=""` alongside `tool_calls`. Empty string passes `is not None`, enters text branch, `elif tool_calls` never runs. Fix: check tool_calls **before** content.
+
+### `patches/vllm_glm47_tool_parser.py` — GLM-4.7 no-newline tool call format
+
+GLM-4.7 emits `<tool_call>Bash<arg_key>...` without a newline between function name and args. The parent class parser requires `\n`. This patch installs a subclass that handles both formats.
+
+Required serve flags: `--tool-call-parser glm47 --enable-auto-tool-choice`
 
 ---
 

@@ -1,6 +1,6 @@
 # vLLM SM120 NVFP4 — Working State Report
 
-**Date:** 2026-02-20
+**Date:** 2026-02-21
 **Hardware:** 4x NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition (SM120, CC 12.0, 96 GiB each)
 **Driver:** 580.105.08
 **Model:** `Salyut1/GLM-4.7-NVFP4` (177B ModelOpt/NVFP4, local HF cache snapshot)
@@ -112,6 +112,93 @@ WARNING: Checkpoint does not provide a q scaling factor. Setting it to k_scale.
 Harmless when using `TRITON_ATTN`.
 
 **Survivability:** Lost on `uv tool install --reinstall vllm`. Must re-apply after reinstall.
+
+---
+
+### Patch 2 — GLM-4.7 tool call parser (no-newline format)
+
+**File:** `~/.local/share/uv/tools/vllm/lib/python3.12/site-packages/vllm/tool_parsers/glm47_moe_tool_parser.py`
+
+**Symptom:** Tool calls silently not returned; `Failed to parse tool call` warnings in logs.
+
+**Cause:** GLM-4.7 emits tool calls without a newline between the function name and the first arg tag:
+```
+GLM-4.5: <tool_call>func_name\n<arg_key>...</arg_key>...</tool_call>
+GLM-4.7: <tool_call>func_name<arg_key>...</arg_key>...</tool_call>
+```
+The parent class (`Glm4MoeModelToolParser`) regex is `r"<tool_call>([^\n]*)\n(.*)</tool_call>"` — requires a newline that GLM-4.7 doesn't emit.
+
+**Fix:** `Glm47MoeModelToolParser` subclass overrides both regexes:
+```python
+self.func_detail_regex = re.compile(
+    r"<tool_call>([^\s<]+)\s*(.*?)</tool_call>", re.DOTALL
+)
+self.func_arg_regex = re.compile(
+    r"<arg_key>(.*?)</arg_key>\s*<arg_value>(.*?)</arg_value>", re.DOTALL
+)
+```
+Works for both GLM-4.5 (with newline) and GLM-4.7 (no newline) formats.
+
+**Required serve flags:**
+```bash
+--tool-call-parser glm47 --enable-auto-tool-choice
+```
+
+---
+
+### Patch 3 — Anthropic endpoint tool call bugs (4 fixes)
+
+**File:** `~/.local/share/uv/tools/vllm/lib/python3.12/site-packages/vllm/entrypoints/anthropic/serving.py`
+
+**Symptom:** Tool calls not returned to Anthropic SDK clients (e.g. Claude Code via `/v1/messages`). No errors in logs.
+
+**Bug 1 — `messages_full_converter` (non-streaming):**
+```python
+# Before:
+for tool_call in generator.choices[0].message.tool_calls:
+# After:
+for tool_call in (generator.choices[0].message.tool_calls or []):
+```
+`message.tool_calls` is `None` when there are no tool calls → `TypeError: 'NoneType' is not iterable`.
+
+**Bug 2 — `message_stream_converter` (streaming) NoneType:**
+```python
+# Before:
+elif len(origin_chunk.choices[0].delta.tool_calls) > 0:
+# After:
+elif origin_chunk.choices[0].delta.tool_calls and len(...) > 0:
+```
+`delta.tool_calls` is `None` for non-tool-call chunks → `TypeError: object of type 'NoneType' has no len()`.
+
+**Bug 3 — Single-chunk tool call args not emitted (streaming):**
+vLLM's tool parser emits the complete tool call (id + function name + arguments) in a single streaming chunk. The original code only emitted `content_block_start` but not the follow-up `content_block_delta` for the arguments. Fixed by emitting `content_block_delta` immediately after `content_block_start` when args are already present.
+
+**Bug 4 — Empty `delta.content` blocks tool calls (streaming, root cause):**
+vLLM sends `delta.content=""` (empty string, not `None`) in the same chunk as `delta.tool_calls`. The content check `if ... delta.content is not None` passes for empty string, enters the text branch, and the `elif tool_calls` is never reached — all tool calls silently dropped.
+
+**Fix:** Check `tool_calls` BEFORE `content` in the streaming dispatch:
+```python
+# tool calls — check BEFORE content; vLLM sends delta.content="" alongside tool_calls
+if origin_chunk.choices[0].delta.tool_calls and len(...) > 0:
+    ...
+elif origin_chunk.choices[0].delta.content is not None:
+    ...
+```
+
+---
+
+## Performance (observed, prefix cache warm)
+
+From logs during normal Claude Code usage (99k token system prompt):
+
+| Metric | Observed |
+|--------|----------|
+| Avg prompt throughput | 3,900–7,500 tok/s |
+| Avg generation throughput | 15–33 tok/s |
+| Prefix cache hit rate | 83–85% |
+| GPU KV cache usage | ~6–7% |
+
+**Note:** Prompt throughput is inflated by prefix caching — the 83–85% hit rate means most of the prompt tokens are served from cache, not re-computed. Cold-start (fresh cache) prefill TPS will be significantly lower. For real throughput benchmarks use `python -m vllm.benchmarks.benchmark_throughput` with prefix caching disabled.
 
 ---
 
