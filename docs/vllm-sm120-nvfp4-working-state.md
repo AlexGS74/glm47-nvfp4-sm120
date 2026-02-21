@@ -302,6 +302,23 @@ removed from prior `tool_use` and `tool_result` blocks.
 **Fix (in proxy):** Strip all `cache_control` fields from system blocks and
 message content blocks before forwarding.
 
+#### Confirmed fixed — post-proxy hit rate
+
+After applying all three proxy fixes, session diffs show only `+N/-0` lines
+(pure additions) for every turn after the first. No more modifications to
+existing messages. Sessions that previously created a new unique hash on every
+request now maintain a stable session ID across all turns.
+
+Observed hit rate post-proxy: **59–85%** depending on session maturity:
+- Long-running interactive sessions (50+ msgs): ~85–90%
+- Sub-agents with distinct system prompts: starts cold, climbs per-turn
+- Server-wide average across mixed sessions: ~59%
+
+The remaining misses are genuine — different specialized sub-agents (e.g.,
+CODIFY Decide/Invite/Forward phases) have genuinely different system prompts
+and each maintains its own separate KV cache prefix. This is correct behaviour,
+not a fixable bug.
+
 #### Cache buster 3 — MCP tool reordering
 
 With 80+ tool definitions (built-ins + MCP servers), the tool block is large
