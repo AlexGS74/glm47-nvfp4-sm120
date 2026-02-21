@@ -12,4 +12,8 @@ model_list:
       api_key: x
 
 general_settings:
-  master_key: x
+  pass_through_all_models: true
+  allow_requests_on_db_unavailable: true
+
+litellm_settings:
+  drop_params: true
