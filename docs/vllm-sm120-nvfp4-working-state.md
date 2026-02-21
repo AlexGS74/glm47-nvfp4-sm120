@@ -286,7 +286,23 @@ https://github.com/anthropics/claude-code/issues — the nonce could be moved
 to an HTTP header instead of the system prompt body, which would leave the
 cacheable prefix intact.
 
-#### Cache buster 2 — MCP tool reordering
+#### Cache buster 2 — Moving `cache_control` breakpoints (critical)
+
+Claude Code uses Anthropic's prompt caching API. It attaches
+`cache_control: {type: ephemeral}` to the latest messages as cache breakpoints,
+then **removes** those markers on the next turn (the breakpoint moves forward
+to the new tail messages). For vLLM these fields are meaningless, but the
+changed JSON content modifies the hash of every affected message, causing a
+cache miss for all tokens from that point onward — invalidating the entire
+conversation history on every turn.
+
+Identified in `--dump-dir` diffs: turn_001 → turn_002 showed `cache_control`
+removed from prior `tool_use` and `tool_result` blocks.
+
+**Fix (in proxy):** Strip all `cache_control` fields from system blocks and
+message content blocks before forwarding.
+
+#### Cache buster 3 — MCP tool reordering
 
 With 80+ tool definitions (built-ins + MCP servers), the tool block is large
 and injected at position 0 of the formatted GLM-4.7 prompt. MCP servers
@@ -295,7 +311,7 @@ between requests even when the content is identical.
 
 **Fix (in proxy):** Sort tools alphabetically by name before forwarding.
 
-#### Cache buster 3 — `currentDate` injection (daily)
+#### Cache buster 4 — `currentDate` injection (daily)
 
 Claude Code appends `Today's date is YYYY-MM-DD.` to MEMORY.md content before
 injecting it into `<system-reminder>` blocks in user messages. Changes at
