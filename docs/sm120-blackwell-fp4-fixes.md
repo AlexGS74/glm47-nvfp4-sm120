@@ -284,3 +284,133 @@ This used the CUTLASS FP4 path via flashinfer 0.5.x (SGLang v0.5.6 pins `flashin
 
 All `.venv` patches are in the installed flashinfer package and will be lost on reinstall.
 The `layer.py` patch is in the SGLang dev install and survives reinstall as long as the repo is not reset.
+
+---
+
+## Updates
+
+### 2026-02-21 - SGLang SM120 NVFP4 Still Broken (NaN Bug Open)
+
+A comprehensive review of the SGLang issue tracker as of 2026-02-21 confirms the following state:
+
+**What has been fixed in SGLang (merged Oct–Jan):**
+- PR [#11737](https://github.com/sgl-project/sglang/pull/11737) — CUTLASS FP4 kernel extended to SM120 (`is_blackwell()` check, `nvfp4_scaled_mm_kernels.cu`, `nvfp4_blockwise_moe.cu`)
+- PR [#11708](https://github.com/sgl-project/sglang/pull/11708) — `dsv3_fused_a_gemm` kernel bypassed on SM120 (produces zeros); `flashinfer.fp4_quantize` used as workaround
+- PR [#14842](https://github.com/sgl-project/sglang/pull/14842) — TRTLLM MHA auto-selection now routes SM120 to FlashInfer instead of crashing
+- PR [#16283](https://github.com/sgl-project/sglang/pull/16283) — TRT AllReduce Fusion restricted to SM90/SM100 only
+- PR [#18546](https://github.com/sgl-project/sglang/pull/18546) — KV cache scale loading for NVFP4 checkpoints (our `k_scale`/`v_scale` KeyError)
+
+**What is still broken:**
+- [Issue #18954](https://github.com/sgl-project/sglang/issues/18954) (opened 2026-02-18, **currently open**) — NVFP4 models produce **NaN outputs** on RTX PRO 6000 (SM120) with `--fp4-gemm-backend flashinfer_cutlass`. This is the same FlashInfer CUTLASS zeros/NaN bug tracked upstream as FlashInfer [#2577](https://github.com/flashinfer-ai/flashinfer/issues/2577). This is exactly our hardware. **SGLang is not usable for NVFP4 on SM120 today.**
+- [PR #18314](https://github.com/sgl-project/sglang/pull/18314) (draft, 2026-02-05) — NVFP4 KV cache for SM120/SM100 attention backends, not yet merged.
+
+**Would SGLang be faster than vLLM if it worked?**
+
+Potentially yes. SGLang generally shows better MoE throughput due to:
+- DeepGEMM integration and more aggressive MoE kernel tuning
+- Better prefix cache implementation
+- Overlap scheduling (prefill/decode overlap)
+
+However, vLLM's `VLLM_CUTLASS` backend is working correctly on SM120 today, while SGLang remains broken. Revisit when issue #18954 is resolved.
+
+---
+
+### 2026-02-21 - Upstream KV Cache Scale Fix
+
+SGLang upstream **commit 33c33a7de** ([#18546](https://github.com/sgl-project/sglang/pull/18546)) addresses the KV cache scale loading issue for NVFP4 models.
+
+**What this fixes:**
+- The reported `KeyError: 'layers.N.self_attn.qkv_proj.k_scale'` when loading GLM-4.7-NVFP4 checkpoints
+- Improved `weight_utils.py` to handle ModelOpt-style scale names that are stored under `k_proj`/`v_proj` but expected under `attn` level
+
+**To apply:**
+```bash
+cd /home/alex/mllm/sglang
+git pull
+```
+
+This upstream fix should eliminate the need for manual patching of checkpoint loading. However, the fundamental SM120 FP4 MoE backend issue remains unresolved (see "What a complete fix requires" section above for ongoing blockers).
+
+---
+
+## Version Timeline Analysis
+
+### SGLang Releases
+
+| Version | Release Date | Notes |
+|---------|--------------|-------|
+| v0.5.6 | 2025-12-02 | Pinned to `flashinfer_python==0.5.3` in requirements |
+| v0.5.7 | 2026-01-01 | |
+| v0.5.8 | 2026-01-23 | |
+| v0.5.8.post1 | 2026-02-05 | |
+| Current main | 2026-02-21 | Latest commits, includes upstream KV cache fix |
+
+### flashinfer-python Releases
+
+| Version | Release Date | Notes |
+|---------|--------------|-------|
+| 0.4.1 | 2025-10-14 | |
+| **0.5.3** | 2025-11-20 | **Last known working version** for SM120 FP4 (used by SGLang v0.5.6) |
+| 0.5.0 | 2025-11-02 | |
+| 0.6.0rc1 | 2025-12-18 | Release candidates for 0.6.0 |
+| 0.6.0rc2 | 2025-12-20 | |
+| 0.6.0 | 2026-01-08 | **Regression: CUTLASS FP4 starts returning zeros, TRTLLM introduces SM100-only cubins** |
+| 0.6.1 | 2026-01-14 | |
+| 0.6.2 | 2026-01-23 | |
+| 0.6.3 | 2026-02-06 | |
+| 0.6.4 | 2026-02-19 | Latest |
+
+### Correlation with Tengyunw Success
+
+The Tengyunw/GLM-4.7-NVFP4 model card was updated on **2025-12-26**, reporting successful inference on 8x RTX 5090s with:
+
+```bash
+python3 -m sglang.launch_server --model-path GLM-4.7-NVFP4/ \
+    --quantization modelopt_fp4 --tp 8 --attention-backend flashinfer
+```
+
+**Timeline context:**
+- 2025-12-02: v0.5.6 released with flashinfer 0.5.3
+- 2025-11-20 → 2025-12-18: flashinfer 0.5.x (stable) → 0.6.0rc1 (regression window)
+- **2025-12-26**: Tengyunw benchmark performed (would use SGLang between v0.5.6 and v0.5.7, before flashinfer 0.6.0 release)
+- 2026-01-08: flashinfer 0.6.0 released (regression point)
+
+**Conclusion:** Tengyunw's success was achieved with flashinfer 0.5.x, likely via the CUTLASS FP4 path that later broke in 0.6.0.
+
+---
+
+## Alternative GLM-4.7-NVFP4 Model Cards
+
+### Tengyunw/GLM-4.7-NVFP4
+
+Model card includes SGLang-specific patches and deployment instructions:
+
+**Required patch in `modelopt_quant.py` (~line 1637):**
+```python
+# Comment out weight scale validation:
+#assert (
+#    weight_scale.shape[assert_dim] % 16 == 0
+#), f"Expected {name}_weight_scale.dim({assert_dim}) to be divisible by 16"
+#assert (
+#    weight_scale.dtype == torch.float8_e4m3
+#), f"{name} Weight Blockscale must be represented as FP8-E4M3"
+```
+
+**Deploy command:**
+```bash
+python3 -m sglang.launch_server --model-path GLM-4.7-NVFP4/ \
+    --quantization modelopt_fp4 --tp 8 --attention-backend flashinfer
+```
+
+**Key differences from this report:**
+- Uses `--attention-backend flashinfer` (this report: crashes, uses `TRITON_ATTN`)
+- Patch targets `modelopt_quant.py` assertion (vs. flashinfer `.cu` kernel patches)
+- Focuses on weight scale validation format differences
+
+### Model Format Differences
+
+The Tengyunw patch suggests their NVFP4 quantization produces weight scales in a format that doesn't strictly match SGLang's FP8-E4M3 expectations. This could indicate:
+- Different quantization calibration datasets/methods
+- Slightly different ModelOpt version/modelopt_nvfp4 parameters
+
+Both models (`Salyut1/GLM-4.7-NVFP4` and `Tengyunw/GLM-4.7-NVFP4`) are NVFP4 but may have internal format differences affecting how they're loaded and validated.
