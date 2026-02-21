@@ -193,6 +193,7 @@ elif origin_chunk.choices[0].delta.content is not None:
 
 Measured with concurrent async requests, `chat_template_kwargs: {enable_thinking: false}`,
 `stream_interval=1`, `max_num_batched_tokens=16384`, `CUDA_DEVICE_MAX_CONNECTIONS=1`.
+(Script default is now `32768`; benchmarks were run at `16384` to isolate the effect.)
 
 | Concurrency | System tok/s | Per-req tok/s | TTFT |
 |-------------|-------------|---------------|------|
@@ -226,7 +227,7 @@ be dominated by silent thinking tokens (TTFT 2–3 s, visible tok/s ~4× lower).
 
 | Change | Effect |
 |--------|--------|
-| `--max-num-batched-tokens 16384` | +72% at C=4, +126% at C=8 vs default |
+| `--max-num-batched-tokens 16384` → `32768` | +72% at C=4, +126% at C=8 vs default; script default raised to 32768 |
 | `CUDA_DEVICE_MAX_CONNECTIONS=1` | Marginal at C=1, helps at high concurrency |
 | Removing `--enable-log-requests/outputs` | ~5–10% across all concurrency levels |
 | `--stream-interval 5` | **Do not use** — causes stalls when `include_usage` is set; no throughput benefit |
@@ -243,6 +244,28 @@ be dominated by silent thinking tokens (TTFT 2–3 s, visible tok/s ~4× lower).
 | Prefix cache hit rate | 83–85% |
 
 Prompt throughput is inflated by prefix caching — 83–85% of tokens are served from cache.
+
+### Prefix cache hit rate behaviour
+
+vLLM V1 prefix caching is enabled by default (hash-based matching). Hit rate varies significantly
+with session state:
+
+| Scenario | Observed hit rate |
+|----------|-------------------|
+| Warm cache, single session continuing | 83–85% |
+| After server restart, first requests | ~0% (cold) |
+| Multiple concurrent sessions, fresh start | 29–37% |
+
+**Why 29% with multiple sessions**: Claude Code's system prompt is ~99k tokens and is shared
+across sessions — that's the cacheable prefix. Each session's conversation history is unique and
+accumulates as the session progresses. If sessions are early in their history, the
+shared-prefix fraction is high; if conversations are long, the unique tail dominates and
+per-session hit rates diverge.
+
+**This is expected behaviour, not a configuration problem.** vLLM's automatic prefix cache
+(APC) is already active and does the right thing. Hit rate climbs back toward 80%+ once the
+system prompt is warm and sessions are reusing the same prefix. No tuning knobs improve it
+beyond keeping the server running continuously and reusing sessions.
 
 ---
 

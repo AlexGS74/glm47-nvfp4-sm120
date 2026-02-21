@@ -22,7 +22,7 @@ SERVED_MODEL_NAME=${SERVED_MODEL_NAME:-glm4.7}
 MAX_MODEL_LEN=${MAX_MODEL_LEN:-200000}   # model max: 202752; Claude Code needs ~99k for system prompt
 MAX_NUM_SEQS=${MAX_NUM_SEQS:-32}
 SWAP_SPACE=${SWAP_SPACE:-16}
-MAX_NUM_BATCHED_TOKENS=${MAX_NUM_BATCHED_TOKENS:-16384}
+MAX_NUM_BATCHED_TOKENS=${MAX_NUM_BATCHED_TOKENS:-32768}  # larger = fewer prefill chunks = less AllReduce overhead; was 16384
 STREAM_INTERVAL=${STREAM_INTERVAL:-1}   # keep at 1 for smooth interactive streaming; interval=5 causes stalls with include_usage
 # 0.80 leaves ~19 GiB free per GPU — enough for CUDA graph capture + sampler warmup
 GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.80}
@@ -55,7 +55,7 @@ export NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE:-0}
 # (decode is memory-bandwidth bound, not compute bound).
 # Requires: sudo visudo -f /etc/sudoers.d/nvidia-power
 #   alex ALL=(ALL) NOPASSWD: /usr/bin/nvidia-smi -pl *
-GPU_POWER_LIMIT=${GPU_POWER_LIMIT:-250}
+GPU_POWER_LIMIT=${GPU_POWER_LIMIT:-270}
 
 # ─────────────────────────────────────────────────────────────────────────────
 
