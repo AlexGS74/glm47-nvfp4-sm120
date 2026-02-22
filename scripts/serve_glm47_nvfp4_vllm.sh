@@ -18,7 +18,7 @@ PORT=${PORT:-30000}  # LiteLLM proxy removed; vLLM serves Anthropic /v1/messages
 TP=${TP:-4}
 DTYPE=${DTYPE:-bfloat16}
 QUANTIZATION=${QUANTIZATION:-modelopt_fp4}
-SERVED_MODEL_NAME=${SERVED_MODEL_NAME:-glm4.7}
+SERVED_MODEL_NAME=${SERVED_MODEL_NAME:-claude-opus-4-5-20251001}
 MAX_MODEL_LEN=${MAX_MODEL_LEN:-200000}   # model max: 202752; Claude Code needs ~99k for system prompt
 MAX_NUM_SEQS=${MAX_NUM_SEQS:-32}
 SWAP_SPACE=${SWAP_SPACE:-16}
@@ -81,7 +81,7 @@ Environment variables:
   MAX_MODEL_LEN       (default: 200000)        # model max: 202752
   MAX_NUM_SEQS        (default: 32)
   SWAP_SPACE          (default: 16)
-  SERVED_MODEL_NAME   (default: glm4.7)
+  SERVED_MODEL_NAME   (default: claude-opus-4-5-20251001)  # spoofed so Claude Code renders thinking
   SPEC_TOKENS         (default: 1)             # MTP speculative tokens; set to 0 to disable
   LOG_LEVEL           (default: INFO)          # set to DEBUG for verbose output
 EOF
