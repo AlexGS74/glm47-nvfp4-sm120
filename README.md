@@ -1,6 +1,8 @@
 # GLM-4.7-NVFP4 on SM120 — Patches & Serve Scripts
 
-Patches and serve scripts to run [`Salyut1/GLM-4.7-NVFP4`](https://huggingface.co/Salyut1/GLM-4.7-NVFP4) on **SM120 (RTX PRO 6000 Blackwell, RTX 5090)** hardware.
+**→ [Quick Start Guide](docs/quickstart.md)** — just the steps to get running.
+
+Patches and serve scripts to run [`Salyut1/GLM-4.7-NVFP4`](https://huggingface.co/Salyut1/GLM-4.7-NVFP4) and [`QuantTrio/GLM-4.7-AWQ`](https://huggingface.co/QuantTrio/GLM-4.7-AWQ) on **SM120 (RTX PRO 6000 Blackwell, RTX 5090)** hardware.
 
 **Working as of 2026-02-21 with vLLM 0.15.1. Tool calling confirmed working with Claude Code via Anthropic `/v1/messages` endpoint.**
 
