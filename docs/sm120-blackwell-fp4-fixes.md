@@ -472,3 +472,43 @@ The FlashInfer project has numerous open issues and PRs related to SM120/Blackwe
 4. Integrate and test CuTe DSL MMFP4 for SM120 (currently SM100-only per #2540 description)
 
 **No merged fixes for SM120 NVFP4 + GEMM** as of 2026-02-21. Most SM120 work is in draft or open PR states.
+
+---
+
+## TensorRT-LLM Investigation — 2026-02-22
+
+Investigated TRT-LLM as an alternative serving backend. GLM-4.7 (full MoE) on SM120 with NVFP4 sits at the intersection of three areas each with active blockers. **Not attempted — would fail for reasons outside our control.**
+
+### SM120 / NVFP4 support in TRT-LLM
+
+- **NVFP4 dense GEMM on SM120**: Works since v0.20+ (confirmed working on RTX 5090, ~8300 tok/s reported). SM120 gate was removed in v0.20.0rc3+ after [Issue #5018](https://github.com/NVIDIA/TensorRT-LLM/issues/5018).
+- **NVFP4 MoE on SM120**: Active blocker — [Issue #7484](https://github.com/NVIDIA/TensorRT-LLM/issues/7484) `RuntimeError: Only SM100 is supported by FP4 block scale MOE` on RTX 6000 PRO (SM120). Confirmed open/assigned as of 2026-02-22. This is our exact GPU + quant + architecture combo.
+- **NVFP4 KV cache on SM120**: Not supported — [Issue #10241](https://github.com/NVIDIA/TensorRT-LLM/issues/10241) opened Jan 2026, added to roadmap but no committed timeline.
+- **FP4 CUTLASS GEMM shared-memory on GB10/SM121**: [Issue #11368](https://github.com/NVIDIA/TensorRT-LLM/issues/11368) — SM120 (RTX 5090/PRO 6000) does NOT have this constraint (it affects DGX Spark only). Not a blocker for us.
+
+### GLM-4.7 model support in TRT-LLM
+
+- **GLM-4.7 full model (MoE)**: Open feature request [Issue #10462](https://github.com/NVIDIA/TensorRT-LLM/issues/10462). Not supported.
+- **GLM-4.7-Flash** (smaller, non-MoE variant): Added in v1.3.0rc3/rc4 (early Feb 2026) via the AutoDeploy/PyTorch backend path. PR #11150 merged. Still in RC — not in a stable release.
+- **GLM-4 (original)**: Listed in the classic TRT-engine support matrix under `examples/chatglm/`, but that path is deprecated in favor of AutoDeploy.
+- **NVFP4 MoE checkpoint assertion bug**: [Issue #6569](https://github.com/NVIDIA/TensorRT-LLM/issues/6569) — `AssertionError: w1_weight_scale_2 != w3_weight_scale_2` when loading ModelOpt FP4 MoE checkpoints (reported on GLM-4.5, Qwen3-235B). Workaround PR proposed; resolution unclear. Would likely affect GLM-4.7-NVFP4 as well.
+
+### Anthropic API endpoint
+
+TRT-LLM exposes OpenAI-compat endpoints only (`/v1/chat/completions`, `/v1/completions`). No `/v1/messages` Anthropic endpoint exists and no feature request is open. Would require a proxy layer (LiteLLM or similar) instead of buster-ripper's native Anthropic path — additional complexity with no clear benefit.
+
+### TRT-LLM issue tracker — active blockers to monitor
+
+| Issue | Description | Status |
+|-------|-------------|--------|
+| [#7484](https://github.com/NVIDIA/TensorRT-LLM/issues/7484) | `Only SM100 supported by FP4 block scale MOE` on SM120 | **Open** — our primary blocker |
+| [#10462](https://github.com/NVIDIA/TensorRT-LLM/issues/10462) | GLM-4.7 full model (non-Flash) support request | **Open** |
+| [#10241](https://github.com/NVIDIA/TensorRT-LLM/issues/10241) | NVFP4 KV cache not available for SM120 in trtllm-gen | **Open** — roadmapped |
+| [#6569](https://github.com/NVIDIA/TensorRT-LLM/issues/6569) | `AssertionError: w1_weight_scale_2 != w3_weight_scale_2` loading ModelOpt FP4 MoE checkpoints | Open — workaround proposed |
+| [#11114](https://github.com/NVIDIA/TensorRT-LLM/issues/11114)/[#11115](https://github.com/NVIDIA/TensorRT-LLM/issues/11115) | GLM-4.7-Flash AutoDeploy performance not yet optimized (cuda graph, sharding) | **Open** |
+
+### Verdict
+
+Do not attempt TRT-LLM until at minimum #7484 (FP4 block scale MoE on SM120) and #10462 (GLM-4.7 full model) are both closed. vLLM AWQ is the correct path today.
+
+**Revisit trigger:** Both #7484 and #10462 closed in a stable TRT-LLM release.
