@@ -75,11 +75,27 @@ concurrency. MTP only breaks even at C=8+. Default set to `SPEC_TOKENS=0`.
 
 ---
 
+## NVFP4 MTP status
+
+Tested MTP on Salyut1/GLM-4.7-NVFP4 (2026-02-22):
+- **Acceptance rate: 0%** — same as previously documented. All 257 tokens drafted, 0 accepted.
+- `/v1/chat/completions` returns 400 Bad Request when bench tool runs with MTP enabled.
+- Benchmark not possible; `SPEC_TOKENS=0` required for NVFP4.
+
+Likely cause: the NVFP4 quantization format or the CUTLASS MoE path produces logit distributions
+incompatible with MTP draft verification. The draft model proposes tokens but none pass the
+speculative acceptance criterion.
+
+**NVFP4 MTP: broken/unusable. AWQ MTP: works but slower than no-MTP at low concurrency.**
+
+---
+
 ## Notes
 
 - `awq_marlin` auto-detected and enabled (vLLM log: "Detected that the model can run with awq_marlin")
-- MTP breaks tool calls at SPEC_TOKENS > 1; not worth fixing since MTP is slower anyway
-- SPEC_TOKENS=0: all features work, throughput already better than NVFP4
+- AWQ MTP breaks tool calls at SPEC_TOKENS > 1; moot since MTP is slower anyway
+- NVFP4 MTP: 0% acceptance rate, benchmark requests return 400 — do not use
+- SPEC_TOKENS=0: correct default for both quants
 - Thinking renders natively in Claude Code with `--served-model-name claude-opus-4-5-20251001`
 - AWQ faster than NVFP4 due to software maturity — vLLM SM120 NVFP4 path uses TRITON_ATTN
   and CUTLASS workarounds; AWQ uses FlashInfer + optimised Marlin kernel

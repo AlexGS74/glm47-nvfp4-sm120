@@ -2,6 +2,14 @@
 
 **→ [Quick Start Guide](docs/quickstart.md)** — just the steps to get running.
 
+Two parallel Claude Code sessions (AWQ, 93.6% prefix cache hit rate):
+```
+Engine 000: Avg prompt throughput: 15188.2 tokens/s, Avg generation throughput: 69.7 tokens/s, Running: 3 reqs, Waiting: 0 reqs, GPU KV cache usage: 71.7%, Prefix cache hit rate: 93.6%
+Engine 000: Avg prompt throughput:     0.0 tokens/s, Avg generation throughput: 62.6 tokens/s, Running: 2 reqs, Waiting: 0 reqs, GPU KV cache usage: 71.4%, Prefix cache hit rate: 93.6%
+Engine 000: Avg prompt throughput:     0.0 tokens/s, Avg generation throughput: 59.8 tokens/s, Running: 2 reqs, Waiting: 0 reqs, GPU KV cache usage: 71.6%, Prefix cache hit rate: 93.6%
+```
+15k tok/s prompt throughput (prefill served from KV cache), ~62 tok/s sustained decode across 2–3 concurrent requests.
+
 Patches and serve scripts to run [`Salyut1/GLM-4.7-NVFP4`](https://huggingface.co/Salyut1/GLM-4.7-NVFP4) and [`QuantTrio/GLM-4.7-AWQ`](https://huggingface.co/QuantTrio/GLM-4.7-AWQ) on **SM120 (RTX PRO 6000 Blackwell, RTX 5090)** hardware.
 
 **Working as of 2026-02-21 with vLLM 0.15.1. Tool calling confirmed working with Claude Code via Anthropic `/v1/messages` endpoint.**
