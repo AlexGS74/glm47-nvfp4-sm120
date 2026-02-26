@@ -1,0 +1,411 @@
+# Qwen3.5-397B-A17B-NVFP4 Working Recipes
+
+> Captured from #qwen-35 Discord thread (RTX6kPRO server) — February 25, 2026  
+> Model: `nvidia/Qwen3.5-397B-A17B-NVFP4` | Hardware: 4x Blackwell GPUs (RTX Pro 6000 / SM120)
+
+---
+
+## Recipe 1 — kcramp's Docker Run (Most Cited, Confirmed Working)
+
+> **Status:** Confirmed working by multiple users. Pinpointed fix for "illegal memory access" CUDA error via `disable_flashinfer_q_quantization: true`.
+
+```bash
+docker run -d \
+  --name vllm-ava-397b \
+  --gpus '"device=0,1,2,3"' \
+  --ipc=host \
+  --shm-size=16g \
+  -p 8000:8000 \
+  -e NVIDIA_VISIBLE_DEVICES=0,1,2,3 \
+  -e NCCL_P2P_LEVEL=4 \
+  -e NCCL_IB_DISABLE=1 \
+  -e OMP_NUM_THREADS=8 \
+  -e SAFETENSORS_FAST_GPU=1 \
+  -e VLLM_WORKER_MULTIPROC_METHOD=spawn \
+  -e VLLM_LOG_MODEL_INSPECTION=1 \
+  -e VLLM_NVFP4_GEMM_BACKEND=cutlass \
+  -v /mnt/raid0/models/Qwen3.5-397B-A17B-NVFP4:/model:ro \
+  vllm/vllm-openai:nightly-f91808ae0ddf750acfdeb351fa072c91d4d678fc \
+  --model /model \
+  --served-model-name X \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --tensor-parallel-size 4 \
+  --gpu-memory-utilization 0.80 \
+  --mm-encoder-tp-mode data \
+  --mm-processor-cache-type shm \
+  --enable-auto-tool-choice \
+  --tool-call-parser qwen3_coder \
+  --reasoning-parser qwen3 \
+  --enable-prefix-caching \
+  --attention-backend FLASHINFER \
+  --attention-config '{"use_trtllm_attention": false, "disable_flashinfer_q_quantization": true}'
+```
+
+**Image:** `vllm/vllm-openai:nightly-f91808ae0ddf750acfdeb351fa072c91d4d678fc`
+
+---
+
+## Recipe 2 — destroyed's Docker Compose (~98–128 tok/s, "Flawlessly Working")
+
+> **Status:** Confirmed working by destroyed. MTP speculative decoding enabled. Image: `cu130-nightly`.
+
+```yaml
+services:
+  vllm-qwen35-397b:
+    image: vllm/vllm-openai:cu130-nightly
+    runtime: nvidia
+    container_name: vllm-qwen35-397b-nvfp4
+    ports:
+      - "5001:8000"
+    ipc: host
+    shm_size: 16gb
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=0,1,2,3
+      - NCCL_P2P_LEVEL=4
+      - NCCL_IB_DISABLE=1
+      - OMP_NUM_THREADS=8
+      - SAFETENSORS_FAST_GPU=1
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+    command: >
+      --model /mnt/Qwen3.5-397B-A17B-NVFP4
+      --trust-remote-code
+      --tensor-parallel-size 4
+      --port 8000
+      --host 0.0.0.0
+      --served-model-name Qwen3.5-397B-A17B
+      --gpu-memory-utilization 0.80
+      --mm-encoder-tp-mode data
+      --mm-processor-cache-type shm
+      --enable-auto-tool-choice
+      --tool-call-parser qwen3_coder
+      --reasoning-parser qwen3
+      --enable-prefix-caching
+      --speculative-config '{"method": "mtp", "num_speculative_tokens": 1}'
+    volumes:
+      - /path/to/Qwen3.5-397B-A17B-NVFP4:/mnt/Qwen3.5-397B-A17B-NVFP4:ro
+    restart: unless-stopped
+```
+
+> **Tip:** Switch `"mtp"` to `"qwen3_next_mtp"` and tokens to `2` for extra speed (per Festr).  
+> Destroyed got **125–140 tok/s** on code gen with `num_speculative_tokens: 5`.
+
+---
+
+## Recipe 3 — Festr's Manual Python in Docker (qwen3_next_mtp, 100–200+ tok/s)
+
+> **Status:** Working. 100–105 tok/s normal chat, 200+ tok/s single-request code gen with tokens=5.
+
+**Step 1 — Enter docker container interactively:**
+
+```bash
+docker run -it --rm --entrypoint /bin/bash \
+  -v /root/.cache/huggingface:/root/.cache/huggingface \
+  -v /mnt:/mnt/ \
+  --ipc=host --shm-size=8g --ulimit memlock=-1 --ulimit stack=67108864 \
+  --gpus all --network host \
+  --mount type=tmpfs,destination=/usr/local/cuda-13.0/compat \
+  vllm/vllm-openai:cu130-nightly
+```
+
+**Step 2 — Run inside the container:**
+
+```bash
+VLLM_LOG_STATS_INTERVAL=1 NCCL_P2P_LEVEL=4 SAFETENSORS_FAST_GPU=1 \
+python3 -m vllm.entrypoints.openai.api_server \
+  --model nvidia/Qwen3.5-397B-A17B-NVFP4 \
+  --host 0.0.0.0 \
+  --port 5000 \
+  --served-model-name Qwen3.5-397B-A17B-NVFP4 \
+  --trust-remote-code \
+  --tensor-parallel-size 4 \
+  --gpu-memory-utilization 0.8 \
+  --max-num-batched-tokens 4092 \
+  --max-num-seqs 128 \
+  --enable-auto-tool-choice \
+  --tool-call-parser qwen3_coder \
+  --reasoning-parser qwen3 \
+  --mm-encoder-tp-mode data \
+  --mm-processor-cache-type shm \
+  --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+```
+
+> **Note:** `qwen3_next_mtp` is recommended by the official Qwen3 model page on vLLM.  
+> MTP gains are best for **single-user** setups — gains disappear under concurrent load.
+
+---
+
+## Recipe 4 — chisleu's Docker Run (qwen3_5-cu130 image)
+
+> **Status:** Working. Uses the official `qwen3_5-cu130` image from vLLM recipes page.
+
+```bash
+docker run --rm --gpus 4 \
+  -v ~/.cache/huggingface:/root/.cache/huggingface \
+  --env "SAFETENSORS_FAST_GPU=1" \
+  --env "VLLM_SLEEP_WHEN_IDLE=1" \
+  -p 5000:5000 \
+  --ipc=host \
+  vllm/vllm-openai:qwen3_5-cu130 \
+  --model nvidia/Qwen3.5-397B-A17B-NVFP4 \
+  --tensor-parallel-size 4 \
+  --host 0.0.0.0 \
+  --served-model-name model \
+  --port 5000 \
+  --reasoning-parser qwen3 \
+  --enable-prefix-caching \
+  --kv-cache-dtype auto \
+  --tool-call-parser qwen3_coder \
+  --enable-auto-tool-choice \
+  --trust-remote-code
+```
+
+**Image source:** https://docs.vllm.ai/projects/recipes/en/latest/Qwen/Qwen3.5.html#gb200-deployment-2-nodes-x-4-gpus
+
+---
+
+## Recipe 5 — SGLang / kcramp (NVFP4, fp8_e5m2 KV cache, ~42 tok/s)
+
+> **Status:** Working ~42 tok/s. Lower speed than vLLM but more stable on some setups.
+
+```bash
+SGLANG_ENABLE_JIT_DEEPGEMM=0 \
+SGLANG_SET_CPU_AFFINITY=true \
+SGLANG_DISABLE_CUDNN_CHECK=1 \
+python -m sglang.launch_server \
+  --model-path /mnt/raid0/models/Qwen3.5-397B-A17B-NVFP4 \
+  --quantization modelopt_fp4 \
+  --kv-cache-dtype fp8_e5m2 \
+  --tensor-parallel-size 4 \
+  --context-length 262144 \
+  --reasoning-parser qwen3 \
+  --tool-call-parser qwen3_coder \
+  --attention-backend triton \
+  --moe-runner-backend flashinfer_cutlass \
+  --mem-fraction-static 0.80 \
+  --chunked-prefill-size 4096 \
+  --max-running-requests 4 \
+  --cuda-graph-max-bs 16 \
+  --preferred-sampling-params '{"temperature":0.6,"top_p":0.95,"top_k":20,"min_p":0.0,"presence_penalty":0.0,"repetition_penalty":1.0}' \
+  --host 0.0.0.0 \
+  --port 8000
+```
+
+---
+
+## Recipe 6 — Ixtrix's SGLang with Speculative Decoding
+
+> **Status:** Working. The faster alias omits `--speculative-draft-model-quantization unquant` which caused 20% slowdown.
+
+**Faster variant (recommended):**
+
+```bash
+alias qwen-sglang='source /models/sglang/.venv/bin/activate && \
+  export CUDA_HOME=/usr/local/cuda-12.9 && \
+  export CUDA_VISIBLE_DEVICES=0,1,2,3 && \
+  python -m sglang.launch_server \
+    --model /models/Qwen3.5-397B-A17B-NVFP4 \
+    --tensor-parallel-size 4 \
+    --quantization modelopt_fp4 \
+    --trust-remote-code \
+    --attention-backend triton \
+    --moe-runner-backend flashinfer_cutlass \
+    --fp4-gemm-backend flashinfer_cudnn \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --tool-call-parser qwen3_coder \
+    --reasoning-parser qwen3'
+```
+
+**With speculative decoding (slightly slower — quantization flag bug):**
+
+```bash
+alias qwen-sglang-spec='source /models/sglang/.venv/bin/activate && \
+  export CUDA_HOME=/usr/local/cuda-12.9 && \
+  export CUDA_VISIBLE_DEVICES=0,1,2,3 && \
+  python -m sglang.launch_server \
+    --model /models/Qwen3.5-397B-A17B-NVFP4 \
+    --tensor-parallel-size 4 \
+    --quantization modelopt_fp4 \
+    --trust-remote-code \
+    --attention-backend triton \
+    --moe-runner-backend flashinfer_cutlass \
+    --fp4-gemm-backend flashinfer_cudnn \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --speculative-eagle-topk 1 \
+    --tool-call-parser qwen3_coder \
+    --reasoning-parser qwen3 \
+    --speculative-algorithm NEXTN \
+    --speculative-num-steps 3 \
+    --speculative-num-draft-tokens 4'
+```
+
+---
+
+## Recipe 7 — Festr's SGLang Source Build (First Working Recipe, Feb 19)
+
+> **Status:** Working ~85 tok/s. Requires building SGLang from a specific branch.  
+> Credit: https://huggingface.co/vincentzed-hf/Qwen3.5-397B-A17B-NVFP4/discussions/1
+
+```bash
+git clone --branch feat/transformers-v5-qwen35-nvfp4 https://github.com/joninco/sglang.git
+cd sglang
+pip install -e "python[all]" --no-build-isolation --no-deps
+
+NCCL_P2P_LEVEL=4 CUDA_VISIBLE_DEVICES=0,1,2,3 \
+python -m sglang.launch_server \
+  --model-path vincentzed-hf/Qwen3.5-397B-A17B-NVFP4 \
+  --tp 4 \
+  --host 0.0.0.0 \
+  --port 5000 \
+  --quantization modelopt_fp4 \
+  --kv-cache-dtype fp8_e4m3 \
+  --attention-backend triton \
+  --moe-runner-backend flashinfer_cutlass \
+  --tool-call-parser qwen3_coder \
+  --reasoning-parser qwen3 \
+  --speculative-algo NEXTN \
+  --speculative-num-steps 3 \
+  --speculative-eagle-topk 1 \
+  --speculative-num-draft-tokens 4 \
+  --speculative-draft-model-quantization unquant \
+  --context-length 262144 \
+  --mem-fraction-static 0.90 \
+  --max-running-requests 4 \
+  --cuda-graph-max-bs 16 \
+  --chunked-prefill-size 4096 \
+  --schedule-policy lpm \
+  --trust-remote-code
+```
+
+---
+
+## Recipe 8 — CyySky's SGLang FP8 (8-GPU, 75–125 tok/s, Channel's First)
+
+> **Status:** Working 75–125 tok/s on 8x GPUs. Uses FP8 model variant.
+
+```bash
+# Download the FP8 model:
+HF_XET_HIGH_PERFORMANCE=1 HF_ENDPOINT=https://hf-mirror.com \
+hf download Qwen/Qwen3.5-397B-A17B-FP8 --local-dir Qwen3.5-397B-A17B-FP8
+
+# Pull and enter docker:
+sudo docker pull lmsysorg/sglang:dev-cu13
+sudo docker run -it --rm -v /home/gpusvr/:/home/gpusvr/ \
+  --ipc=host --shm-size=8g --ulimit memlock=-1 --ulimit stack=67108864 \
+  --gpus all --network host lmsysorg/sglang:dev-cu13 bash
+
+# Inside container (SGLang, FP8, 8 GPU):
+python -m sglang.launch_server \
+  --model-path /home/gpusvr/Qwen3.5-397B-A17B-FP8 \
+  --host 0.0.0.0 --port 9501 \
+  --tp-size 8 \
+  --mem-fraction-static 0.8 \
+  --context-length 262144 \
+  --reasoning-parser qwen3 \
+  --tool-call-parser qwen3_coder \
+  --served-model-name llm_model \
+  --speculative-algo NEXTN \
+  --speculative-num-steps 3 \
+  --speculative-eagle-topk 1 \
+  --speculative-num-draft-tokens 4 \
+  --attention-backend triton \
+  --fp8-gemm-backend triton \
+  --moe-runner-backend triton
+
+# Alternative: vLLM (FP8, 8 GPU):
+vllm serve Qwen3.5-397B-A17B-FP8 \
+  --port 9501 \
+  --tensor-parallel-size 8 \
+  --max-model-len -1 \
+  --reasoning-parser qwen3 \
+  --enable-auto-tool-choice \
+  --tool-call-parser qwen3_coder \
+  --gpu-memory-utilization 0.9 \
+  --served-model-name llm_model \
+  --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'
+```
+
+---
+
+## Critical Config Fixes (NVFP4 model)
+
+> **Note:** destroyed confirmed the config.json edit is **NOT required** if using `cu130-nightly` correctly. Try without first.
+
+If you get weight-loading assertion errors, add these to the ignore list in **both** `config.json` and `hf_quant_config.json`:
+
+```
+"model.language_model.layers..mlp.gate"
+"mtp.fc"
+```
+
+Also: **manually download `hf_quant_config.json`** from HuggingFace if it wasn't included in your download — it's required for the NVFP4 model to load.
+
+---
+
+## Bonus — FastAPI Proxy for OpenCode/SGLang Compatibility
+
+> By Ixtrix. Normalizes multiple system messages into one, fixing "bad prompt" errors when using OpenCode with SGLang.
+
+```python
+from fastapi import FastAPI, Request
+from fastapi.responses import StreamingResponse, Response
+import httpx, json, logging
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+app = FastAPI()
+SGLANG_URL = "http://localhost:8000"
+
+def normalize_messages(messages: list) -> list:
+    system_msgs = [m for m in messages if m.get("role") == "system"]
+    rest = [m for m in messages if m.get("role") != "system"]
+    if not system_msgs:
+        return rest
+    if len(system_msgs) == 1:
+        return system_msgs + rest
+    merged_content = "\n\n".join(
+        m["content"] if isinstance(m["content"], str)
+        else " ".join(part.get("text","") for part in m["content"] if isinstance(part, dict))
+        for m in system_msgs
+    )
+    merged = {"role": "system", "content": merged_content}
+    return [merged] + rest
+
+@app.post("/v1/chat/completions")
+async def proxy(request: Request):
+    body = await request.json()
+    if "messages" in body:
+        body["messages"] = normalize_messages(body["messages"])
+    # Forward to SGLANG_URL ...
+```
+
+---
+
+## Performance Summary (4x Blackwell / RTX Pro 6000)
+
+| Setup | Tok/s (single req) | Notes |
+|---|---|---|
+| vLLM + `qwen3_next_mtp`, spec_tokens=5 | 200+ | Code gen only, single req |
+| vLLM + `qwen3_next_mtp`, spec_tokens=2 | 125–140 | Code gen |
+| vLLM + MTP `method=mtp`, spec_tokens=1 | 98–105 | Normal chat |
+| vLLM, no MTP | ~64 | Baseline |
+| vLLM, `--decode-context-parallel-size 2` | 80–85 | Larger KV cache (1.8M), slower TPS |
+| SGLang NVFP4 (kcramp) | ~42 | Stable, lower speed |
+| SGLang FP8, 8 GPU | 75–125 | Requires 8 GPUs |
+
+> ⚠️ **MTP warning:** Speculative decoding gains disappear under concurrent load. Best for single-user setups.
+
+---
+
+## Useful Links
+
+- **vLLM official recipe:** https://docs.vllm.ai/projects/recipes/en/latest/Qwen/Qwen3.5.html#text-only
+- **SGLang NVFP4 Gist (SM120):** https://gist.github.com/catid/87cca824963f17fe7479a0ed26221397
+- **HF model page (NVFP4):** https://huggingface.co/vincentzed-hf/Qwen3.5-397B-A17B-NVFP4
+- **vLLM mlp.gate bugfix PR:** https://github.com/vllm-project/vllm/pull/35156
+- **SGLang NVFP4 support PR:** https://github.com/sgl-project/sglang/pull/18937
+- **HF discussion thread:** https://huggingface.co/vincentzed-hf/Qwen3.5-397B-A17B-NVFP4/discussions/1
+- **Benchmark comparison (122b vs 397b):** https://qwen122-vs-397-20260224-1154.surge.sh
+- **Qwen 3.5 FP8 quant (community):** https://huggingface.co/Shifusen/Qwen3.5-122B-A10B-FP8
