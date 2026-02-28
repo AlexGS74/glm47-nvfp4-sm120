@@ -53,7 +53,7 @@ export VLLM_SLEEP_WHEN_IDLE=${VLLM_SLEEP_WHEN_IDLE:-1}
 export CUDA_DEVICE_ORDER=${CUDA_DEVICE_ORDER:-PCI_BUS_ID}
 # Compilation level 3 + full cuda graph — higher throughput; override with
 # COMPILATION_CONFIG='{"level":0}' to disable if startup time is an issue
-COMPILATION_CONFIG=${COMPILATION_CONFIG:-'{"level": 3, "cudagraph_mode": "full"}'}
+COMPILATION_CONFIG=${COMPILATION_CONFIG:-'{"level": 3, "cudagraph_mode": "full_and_piecewise"}'}
 
 if [[ ! -x "${VLLM_BIN}" ]]; then
   echo "vllm not found: ${VLLM_BIN}" >&2
