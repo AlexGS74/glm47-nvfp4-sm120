@@ -3,7 +3,8 @@ set -euo pipefail
 
 # Serve GLM-4.7 NVFP4 with vLLM on SM120 (RTX PRO 6000 Blackwell).
 # See docs/sglang/vllm-sm120-nvfp4-working-state.md for full context.
-# Install: uv tool install vllm==0.16.0
+# Install: uv tool install --force --pre vllm --extra-index-url https://wheels.vllm.ai/nightly
+# Then overlay patches: bash patches/overlay_nightly.sh
 
 VLLM_BIN=${VLLM_BIN:-${HOME}/.local/share/uv/tools/vllm/bin/vllm}
 VLLM_PYTHON=${VLLM_PYTHON:-${HOME}/.local/share/uv/tools/vllm/bin/python}
@@ -72,7 +73,7 @@ GPU_POWER_LIMIT=${GPU_POWER_LIMIT:-270}
 
 if [[ ! -x "${VLLM_BIN}" ]]; then
   echo "vllm not found: ${VLLM_BIN}" >&2
-  echo "Install with: uv tool install vllm==0.15.1" >&2
+  echo "Install with: uv tool install --pre vllm --extra-index-url https://wheels.vllm.ai/nightly" >&2
   exit 1
 fi
 
