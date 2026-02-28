@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Evaluate GLM-4.7 quality using lm-evaluation-harness.
-# Starts a local proxy (eval_proxy.py) that injects enable_thinking=false
-# into all requests so GLM-4.7 returns answers in content (not reasoning).
+# Talks directly to vLLM — no proxy needed.
+# chat_template_kwargs (enable_thinking=false) are passed via --gen_kwargs
+# so GLM-4.7 returns answers in content rather than reasoning_content.
 #
 # Usage:
 #   LABEL=awq      ./scripts/eval_quality.sh
@@ -12,23 +13,13 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BUSTER_RIPPER="${BUSTER_RIPPER:-${HOME}/mllm/buster-ripper/buster_ripper.py}"
-
 # ── Server ────────────────────────────────────────────────────────────────────
 SERVER_BASE=${SERVER_BASE:-http://localhost:30000}
-# buster-ripper port — started in --eval-mode to inject enable_thinking=false
-PROXY_PORT=${PROXY_PORT:-30002}
-PROXY_URL="http://127.0.0.1:${PROXY_PORT}"
-# lm-eval local-chat-completions posts directly to this URL
-BASE_URL="${PROXY_URL}/v1/chat/completions"
+BASE_URL="${SERVER_BASE}/v1/chat/completions"
 MODEL=${MODEL:-claude-opus-4-5-20251001}
 EVAL_MAX_TOKENS=${EVAL_MAX_TOKENS:-16384}
-THINKING_BUDGET=${THINKING_BUDGET:-8192}  # cap think block to prevent runaway loops
 
 # ── Tokenizer (for lm-eval token counting) ────────────────────────────────────
-# Matched to the model being evaluated so token budgets are accurate.
-# Override with TOKENIZER_PATH=/path/to/model
 NVFP4_TOKENIZER=$(ls -d "${HOME}/.cache/huggingface/hub/models--Salyut1--GLM-4.7-NVFP4/snapshots/"*/ 2>/dev/null | head -1 || true)
 AWQ_TOKENIZER=$(ls -d "${HOME}/.cache/huggingface/models--QuantTrio--GLM-4.7-AWQ/snapshots/"*/ 2>/dev/null | head -1 || true)
 
@@ -39,7 +30,6 @@ elif [[ "${LABEL:-}" == "awq"* ]] && [[ -n "${AWQ_TOKENIZER:-}" ]]; then
 elif [[ "${LABEL:-}" == "nvfp4"* ]] && [[ -n "${NVFP4_TOKENIZER:-}" ]]; then
   TOKENIZER_PATH="${NVFP4_TOKENIZER}"
 else
-  # Fallback: prefer NVFP4 then AWQ
   TOKENIZER_PATH="${NVFP4_TOKENIZER:-${AWQ_TOKENIZER:-}}"
 fi
 
@@ -54,12 +44,10 @@ fi
 # gsm8k_cot_zeroshot: zero-shot chain-of-thought math (1319 problems)
 TASKS=${TASKS:-humaneval_instruct,mbpp_instruct,gsm8k_cot_zeroshot}
 
-# Limit samples per task for speed — set to 0 for full eval
-NUM_SAMPLES=${NUM_SAMPLES:-100}
+# Number of samples per task — 0 = full eval
+NUM_SAMPLES=${NUM_SAMPLES:-0}
 
-# Label identifies the run (awq / nvfp4 / etc.)
 LABEL=${LABEL:-no-label}
-
 OUTPUT_DIR=${OUTPUT_DIR:-./evals/${LABEL}}
 mkdir -p "${OUTPUT_DIR}"
 
@@ -78,32 +66,6 @@ if ! curl -sf "${SERVER_BASE}/v1/models" >/dev/null 2>&1; then
   exit 1
 fi
 
-# ── Start buster-ripper in eval-mode (injects enable_thinking=false) ──────────
-# Kill any stale proxy on the eval port before starting a fresh one
-fuser -k "${PROXY_PORT}/tcp" 2>/dev/null || true
-sleep 0.3
-
-PROXY_PID=""
-cleanup() { [[ -n "${PROXY_PID}" ]] && kill "${PROXY_PID}" 2>/dev/null || true; }
-trap cleanup EXIT
-
-uv run "${BUSTER_RIPPER}" \
-  --upstream "${SERVER_BASE}" \
-  --port "${PROXY_PORT}" \
-  --host 127.0.0.1 \
-  --eval-mode \
-  --eval-max-tokens "${EVAL_MAX_TOKENS}" \
-  --eval-thinking-budget "${THINKING_BUDGET}" \
-  >/tmp/buster-ripper-eval.log 2>&1 &
-PROXY_PID=$!
-
-# Wait for proxy to be ready
-for i in $(seq 1 15); do
-  sleep 0.5
-  if curl -sf "${PROXY_URL}/v1/models" >/dev/null 2>&1; then break; fi
-done
-echo "buster-ripper eval-mode listening on :${PROXY_PORT}"
-
 # ── Run ───────────────────────────────────────────────────────────────────────
 LIMIT_FLAG=""
 if [[ "${NUM_SAMPLES}" -gt 0 ]]; then
@@ -117,7 +79,7 @@ export HF_DATASETS_OFFLINE=1
 export HF_HUB_OFFLINE=1
 
 echo "GLM-4.7 quality eval — ${LABEL} — $(date '+%Y-%m-%d %H:%M')"
-echo "Server:    ${SERVER_BASE} (via proxy :${PROXY_PORT})  Model: ${MODEL}"
+echo "Server:    ${BASE_URL}  Model: ${MODEL}"
 echo "Tokenizer: ${TOKENIZER_PATH}"
 echo "Tasks:     ${TASKS}"
 echo "Samples per task: ${NUM_SAMPLES:-full}  Concurrent: ${NUM_CONCURRENT}"
@@ -130,7 +92,7 @@ uvx lm_eval run \
   --tasks "${TASKS}" \
   --apply_chat_template \
   --confirm_run_unsafe_code \
-  --gen_kwargs "max_tokens=32768" \
+  --gen_kwargs "max_tokens=${EVAL_MAX_TOKENS},chat_template_kwargs={\"enable_thinking\":false}" \
   --output_path "${OUTPUT_DIR}" \
   --log_samples \
   ${LIMIT_FLAG} \
