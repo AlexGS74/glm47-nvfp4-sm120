@@ -32,7 +32,6 @@ for C in 1 2 4 8 16; do
         --base-url "${BASE_URL}" \
         --model "${MODEL}" \
         --tokenizer "${TOKENIZER_PATH}" \
-        --endpoint /v1/chat/completions \
         --dataset-name random \
         --random-input-len "${INPUT_LEN}" \
         --random-output-len "${OUTPUT_LEN}" \
