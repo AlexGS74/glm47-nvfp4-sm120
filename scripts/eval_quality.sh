@@ -13,7 +13,9 @@
 set -euo pipefail
 
 # ── Server ────────────────────────────────────────────────────────────────────
-BASE_URL=${BASE_URL:-http://localhost:30000/v1}
+SERVER_BASE=${SERVER_BASE:-http://localhost:30000}
+# lm-eval local-chat-completions uses base_url as the direct POST endpoint
+BASE_URL=${BASE_URL:-${SERVER_BASE}/v1/chat/completions}
 MODEL=${MODEL:-claude-opus-4-5-20251001}
 
 # ── Tokenizer (for lm-eval token counting) ────────────────────────────────────
@@ -60,8 +62,8 @@ if ! command -v uvx &>/dev/null; then
 fi
 
 # Check server is up
-if ! curl -sf "${BASE_URL}/models" >/dev/null 2>&1; then
-  echo "ERROR: vLLM server not reachable at ${BASE_URL}" >&2
+if ! curl -sf "${SERVER_BASE}/v1/models" >/dev/null 2>&1; then
+  echo "ERROR: vLLM server not reachable at ${SERVER_BASE}" >&2
   echo "Start the server first (serve_glm47_awq.sh or serve_glm47_nvfp4_vllm.sh)" >&2
   exit 1
 fi
@@ -72,6 +74,12 @@ if [[ "${NUM_SAMPLES}" -gt 0 ]]; then
   LIMIT_FLAG="--limit ${NUM_SAMPLES}"
 fi
 
+# humaneval/mbpp execute model-generated code — required opt-in
+export HF_ALLOW_CODE_EVAL=1
+# All datasets cached locally — no network needed
+export HF_DATASETS_OFFLINE=1
+export HF_HUB_OFFLINE=1
+
 echo "GLM-4.7 quality eval — ${LABEL} — $(date '+%Y-%m-%d %H:%M')"
 echo "Server:    ${BASE_URL}  Model: ${MODEL}"
 echo "Tokenizer: ${TOKENIZER_PATH}"
@@ -80,11 +88,17 @@ echo "Samples per task: ${NUM_SAMPLES:-full}"
 echo "Output:    ${OUTPUT_DIR}"
 echo ""
 
+# Parallel requests — vLLM handles batching, more concurrent = better GPU util
+NUM_CONCURRENT=${NUM_CONCURRENT:-16}
+
 uvx lm_eval run \
   --model local-chat-completions \
-  --model_args "model=${MODEL},base_url=${BASE_URL},tokenizer=${TOKENIZER_PATH},tokenizer_backend=huggingface,max_retries=3,timeout=120" \
+  --model_args "model=${MODEL},base_url=${BASE_URL},tokenizer=${TOKENIZER_PATH},tokenizer_backend=huggingface,max_retries=3,timeout=300,num_concurrent=${NUM_CONCURRENT}" \
   --tasks "${TASKS}" \
   --apply_chat_template \
+  --confirm_run_unsafe_code \
+  --gen_kwargs "max_tokens=1024" \
+  --system_instruction "You are a helpful assistant. Respond directly without thinking tags or reasoning steps. Give concise, correct answers." \
   --output_path "${OUTPUT_DIR}" \
   --log_samples \
   ${LIMIT_FLAG} \
