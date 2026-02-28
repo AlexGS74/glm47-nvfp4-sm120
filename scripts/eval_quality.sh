@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Evaluate GLM-4.7 quality using lm-evaluation-harness.
-# Hits a running vLLM server at BASE_URL (default: localhost:30000).
-# Run once with AWQ, once with NVFP4 to compare quality.
+# Starts a local proxy (eval_proxy.py) that injects enable_thinking=false
+# into all requests so GLM-4.7 returns answers in content (not reasoning).
 #
 # Usage:
 #   LABEL=awq      ./scripts/eval_quality.sh
@@ -12,27 +12,34 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUSTER_RIPPER="${BUSTER_RIPPER:-${HOME}/mllm/buster-ripper/buster_ripper.py}"
+
 # ── Server ────────────────────────────────────────────────────────────────────
 SERVER_BASE=${SERVER_BASE:-http://localhost:30000}
-# lm-eval local-chat-completions uses base_url as the direct POST endpoint
-BASE_URL=${BASE_URL:-${SERVER_BASE}/v1/chat/completions}
+# buster-ripper port — started in --eval-mode to inject enable_thinking=false
+PROXY_PORT=${PROXY_PORT:-30002}
+PROXY_URL="http://127.0.0.1:${PROXY_PORT}"
+# lm-eval local-chat-completions posts directly to this URL
+BASE_URL="${PROXY_URL}/v1/chat/completions"
 MODEL=${MODEL:-claude-opus-4-5-20251001}
+EVAL_MAX_TOKENS=${EVAL_MAX_TOKENS:-1024}
 
 # ── Tokenizer (for lm-eval token counting) ────────────────────────────────────
 # Matched to the model being evaluated so token budgets are accurate.
 # Override with TOKENIZER_PATH=/path/to/model
-NVFP4_TOKENIZER=$(ls -d "${HOME}/.cache/huggingface/hub/models--Salyut1--GLM-4.7-NVFP4/snapshots/"*/ 2>/dev/null | head -1)
-AWQ_TOKENIZER=$(ls -d "${HOME}/.cache/huggingface/models--QuantTrio--GLM-4.7-AWQ/snapshots/"*/ 2>/dev/null | head -1)
+NVFP4_TOKENIZER=$(ls -d "${HOME}/.cache/huggingface/hub/models--Salyut1--GLM-4.7-NVFP4/snapshots/"*/ 2>/dev/null | head -1 || true)
+AWQ_TOKENIZER=$(ls -d "${HOME}/.cache/huggingface/models--QuantTrio--GLM-4.7-AWQ/snapshots/"*/ 2>/dev/null | head -1 || true)
 
 if [[ -n "${TOKENIZER_PATH:-}" ]]; then
   : # already set by caller
-elif [[ "${LABEL}" == "awq"* ]] && [[ -n "${AWQ_TOKENIZER}" ]]; then
+elif [[ "${LABEL:-}" == "awq"* ]] && [[ -n "${AWQ_TOKENIZER:-}" ]]; then
   TOKENIZER_PATH="${AWQ_TOKENIZER}"
-elif [[ "${LABEL}" == "nvfp4"* ]] && [[ -n "${NVFP4_TOKENIZER}" ]]; then
+elif [[ "${LABEL:-}" == "nvfp4"* ]] && [[ -n "${NVFP4_TOKENIZER:-}" ]]; then
   TOKENIZER_PATH="${NVFP4_TOKENIZER}"
 else
   # Fallback: prefer NVFP4 then AWQ
-  TOKENIZER_PATH="${NVFP4_TOKENIZER:-${AWQ_TOKENIZER}}"
+  TOKENIZER_PATH="${NVFP4_TOKENIZER:-${AWQ_TOKENIZER:-}}"
 fi
 
 if [[ -z "${TOKENIZER_PATH:-}" ]]; then
@@ -55,18 +62,41 @@ LABEL=${LABEL:-no-label}
 OUTPUT_DIR=${OUTPUT_DIR:-./evals/${LABEL}}
 mkdir -p "${OUTPUT_DIR}"
 
+# Parallel requests to vLLM — 16 concurrent saturates the server nicely
+NUM_CONCURRENT=${NUM_CONCURRENT:-16}
+
 # ── Sanity checks ─────────────────────────────────────────────────────────────
 if ! command -v uvx &>/dev/null; then
   echo "uvx not found — install uv: curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
   exit 1
 fi
 
-# Check server is up
 if ! curl -sf "${SERVER_BASE}/v1/models" >/dev/null 2>&1; then
   echo "ERROR: vLLM server not reachable at ${SERVER_BASE}" >&2
   echo "Start the server first (serve_glm47_awq.sh or serve_glm47_nvfp4_vllm.sh)" >&2
   exit 1
 fi
+
+# ── Start buster-ripper in eval-mode (injects enable_thinking=false) ──────────
+PROXY_PID=""
+cleanup() { [[ -n "${PROXY_PID}" ]] && kill "${PROXY_PID}" 2>/dev/null || true; }
+trap cleanup EXIT
+
+uv run "${BUSTER_RIPPER}" \
+  --upstream "${SERVER_BASE}" \
+  --port "${PROXY_PORT}" \
+  --host 127.0.0.1 \
+  --eval-mode \
+  --eval-max-tokens "${EVAL_MAX_TOKENS}" \
+  >/tmp/buster-ripper-eval.log 2>&1 &
+PROXY_PID=$!
+
+# Wait for proxy to be ready
+for i in $(seq 1 15); do
+  sleep 0.5
+  if curl -sf "${PROXY_URL}/v1/models" >/dev/null 2>&1; then break; fi
+done
+echo "buster-ripper eval-mode listening on :${PROXY_PORT}"
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 LIMIT_FLAG=""
@@ -81,15 +111,12 @@ export HF_DATASETS_OFFLINE=1
 export HF_HUB_OFFLINE=1
 
 echo "GLM-4.7 quality eval — ${LABEL} — $(date '+%Y-%m-%d %H:%M')"
-echo "Server:    ${BASE_URL}  Model: ${MODEL}"
+echo "Server:    ${SERVER_BASE} (via proxy :${PROXY_PORT})  Model: ${MODEL}"
 echo "Tokenizer: ${TOKENIZER_PATH}"
 echo "Tasks:     ${TASKS}"
-echo "Samples per task: ${NUM_SAMPLES:-full}"
+echo "Samples per task: ${NUM_SAMPLES:-full}  Concurrent: ${NUM_CONCURRENT}"
 echo "Output:    ${OUTPUT_DIR}"
 echo ""
-
-# Parallel requests — vLLM handles batching, more concurrent = better GPU util
-NUM_CONCURRENT=${NUM_CONCURRENT:-16}
 
 uvx lm_eval run \
   --model local-chat-completions \
@@ -97,8 +124,6 @@ uvx lm_eval run \
   --tasks "${TASKS}" \
   --apply_chat_template \
   --confirm_run_unsafe_code \
-  --gen_kwargs "max_tokens=1024" \
-  --system_instruction "You are a helpful assistant. Respond directly without thinking tags or reasoning steps. Give concise, correct answers." \
   --output_path "${OUTPUT_DIR}" \
   --log_samples \
   ${LIMIT_FLAG} \
