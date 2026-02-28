@@ -124,6 +124,7 @@ uvx lm_eval run \
   --tasks "${TASKS}" \
   --apply_chat_template \
   --confirm_run_unsafe_code \
+  --gen_kwargs "max_tokens=4096" \
   --output_path "${OUTPUT_DIR}" \
   --log_samples \
   ${LIMIT_FLAG} \
