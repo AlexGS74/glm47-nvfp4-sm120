@@ -12,8 +12,6 @@
 
 set -euo pipefail
 
-LM_EVAL_BIN=${LM_EVAL_BIN:-${HOME}/.local/share/uv/tools/lm-eval/bin/lm_eval}
-
 # ── Server ────────────────────────────────────────────────────────────────────
 BASE_URL=${BASE_URL:-http://localhost:30000/v1}
 MODEL=${MODEL:-claude-opus-4-5-20251001}
@@ -56,9 +54,8 @@ OUTPUT_DIR=${OUTPUT_DIR:-./evals/${LABEL}}
 mkdir -p "${OUTPUT_DIR}"
 
 # ── Sanity checks ─────────────────────────────────────────────────────────────
-if [[ ! -x "${LM_EVAL_BIN}" ]]; then
-  echo "lm_eval not found: ${LM_EVAL_BIN}" >&2
-  echo "Install with: uv tool install lm-eval" >&2
+if ! command -v uvx &>/dev/null; then
+  echo "uvx not found — install uv: curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
   exit 1
 fi
 
@@ -83,7 +80,7 @@ echo "Samples per task: ${NUM_SAMPLES:-full}"
 echo "Output:    ${OUTPUT_DIR}"
 echo ""
 
-"${LM_EVAL_BIN}" run \
+uvx lm_eval run \
   --model local-chat-completions \
   --model_args "model=${MODEL},base_url=${BASE_URL},tokenizer=${TOKENIZER_PATH},tokenizer_backend=huggingface,max_retries=3,timeout=120" \
   --tasks "${TASKS}" \
