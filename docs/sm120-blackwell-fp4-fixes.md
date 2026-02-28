@@ -512,3 +512,39 @@ TRT-LLM exposes OpenAI-compat endpoints only (`/v1/chat/completions`, `/v1/compl
 Do not attempt TRT-LLM until at minimum #7484 (FP4 block scale MoE on SM120) and #10462 (GLM-4.7 full model) are both closed. vLLM AWQ is the correct path today.
 
 **Revisit trigger:** Both #7484 and #10462 closed in a stable TRT-LLM release.
+
+---
+
+## Status Update — 2026-02-28
+
+### Summary
+
+No blockers have been resolved. All critical issues remain open. Some attention-related PRs are progressing in flashinfer but none have merged and none address the MoE FP4 GEMM root cause.
+
+### Blocker Status — No Change
+
+| Issue | State | Summary |
+|---|---|---|
+| flashinfer [#2577](https://github.com/flashinfer-ai/flashinfer/issues/2577) | **Open** | NVFP4 mm_fp4 GEMM broken on SM120 — still the root blocker |
+| sglang [#18954](https://github.com/sgl-project/sglang/issues/18954) | **Open** | NVFP4 NaN on SM120 — confirmed FlashInfer CUTLASS backend issue; Triton more reliable than CUTLASS/DeepGemm on SM120 |
+| TRT-LLM [#7484](https://github.com/NVIDIA/TensorRT-LLM/issues/7484) | **Open** | FP4 block scale MoE SM100-only — no SM120 fix, still assigned |
+| TRT-LLM [#10462](https://github.com/NVIDIA/TensorRT-LLM/issues/10462) | **Open** | GLM-4.7 full model — gibberish output even on B200 hardware; root cause unclear, still investigating |
+
+### Movement — PRs In Progress, None Merged
+
+| PR | State | Notes |
+|---|---|---|
+| flashinfer [#2598](https://github.com/flashinfer-ai/flashinfer/pull/2598) | Open | CuTe DSL flash attention for SM120 — JIT kernels, validated on SM121, fallback to FA2 |
+| flashinfer [#2561](https://github.com/flashinfer-ai/flashinfer/pull/2561) | Open | SM120 standard attention kernels (fmha_v2, BF16/FP16) — validated on DGX Spark, awaiting 7 maintainer approvals |
+| flashinfer [#2520](https://github.com/flashinfer-ai/flashinfer/pull/2520) | Open | NVFP4 KV cache decode on SM120 — functional, code review issues (variable scope, copy-paste errors in tests) |
+| sglang [#18314](https://github.com/sgl-project/sglang/pull/18314) | Draft | NVFP4 KV cache for SM120 — critical review issues (unconditional Triton forcing, in-place list mutations, code duplication), CI not triggered |
+
+### Notable: Workaround Found for flashinfer #2577
+
+A workaround was identified in #2577: using `.float()` conversion when calculating scales fixes some backend paths. Does **not** fix MoE FP4 specifically. Worth testing for non-MoE FP4 GEMM paths.
+
+### Conclusion
+
+**vLLM AWQ remains the correct path today.** The flashinfer attention PRs (#2561, #2598) are the closest to landing but address attention, not the MoE FP4 GEMM. No change to the serving stack is warranted until flashinfer #2577 closes.
+
+**Revisit trigger:** flashinfer #2577 closed, OR sglang #18954 closed with a confirmed fix.
