@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Serve GLM-4.7 NVFP4 with vLLM on SM120 (RTX PRO 6000 Blackwell).
 # See docs/sglang/vllm-sm120-nvfp4-working-state.md for full context.
-# Install: uv tool install vllm==0.15.1
+# Install: uv tool install vllm==0.16.0
 
 VLLM_BIN=${VLLM_BIN:-${HOME}/.local/share/uv/tools/vllm/bin/vllm}
 VLLM_PYTHON=${VLLM_PYTHON:-${HOME}/.local/share/uv/tools/vllm/bin/python}

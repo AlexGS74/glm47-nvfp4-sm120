@@ -11,7 +11,7 @@
 
 | Package | Version |
 |---------|---------|
-| vllm | 0.15.1 |
+| vllm | 0.16.0 |
 | torch | 2.9.1+cu128 |
 | transformers | 4.57.6 |
 | flashinfer | 0.6.1 |
@@ -22,7 +22,7 @@
 
 Install:
 ```bash
-uv tool install vllm==0.15.1
+uv tool install vllm==0.16.0
 ```
 
 ---
@@ -308,7 +308,7 @@ Occurred after CUDA graphs captured successfully. The warmup allocates batches u
 
 ```
 Python:      ~/.local/share/uv/tools/vllm/bin/python
-vLLM:        0.15.1
+vLLM:        0.16.0
 Model:       ...GLM-4.7-NVFP4/snapshots/531df318...
 TP:          4
 Attention:   TRITON_ATTN

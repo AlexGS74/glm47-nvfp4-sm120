@@ -5,7 +5,7 @@ set -euo pipefail
 # Uses Triton kernels which compile natively to PTX, avoiding CUTLASS issues.
 #
 # Install:
-#   uv tool install vllm==0.15.1
+#   uv tool install vllm==0.16.0
 #   uv pip install huggingface_hub
 
 HF_MODEL_ID="QuantTrio/GLM-4.7-AWQ"
