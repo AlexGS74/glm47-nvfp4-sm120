@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Evaluate GLM-4.7 quality using lm-evaluation-harness.
-# Talks directly to vLLM — no proxy needed.
-# chat_template_kwargs (enable_thinking=false) are passed via --gen_kwargs
-# so GLM-4.7 returns answers in content rather than reasoning_content.
+# Routes through buster-ripper (eval-mode) which:
+#   - strips max_gen_toks (lm-eval internal field; breaks response truncation if sent)
+#   - strips empty Bearer auth headers
+#   - injects chat_template_kwargs.enable_thinking=false
 #
 # Usage:
 #   LABEL=awq      ./scripts/eval_quality.sh
@@ -13,11 +14,16 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUSTER_RIPPER="${BUSTER_RIPPER:-${HOME}/mllm/buster-ripper/buster_ripper.py}"
+
 # ── Server ────────────────────────────────────────────────────────────────────
 SERVER_BASE=${SERVER_BASE:-http://localhost:30000}
-BASE_URL="${SERVER_BASE}/v1/chat/completions"
+PROXY_PORT=${PROXY_PORT:-30002}
+PROXY_URL="http://127.0.0.1:${PROXY_PORT}"
+BASE_URL="${PROXY_URL}/v1/chat/completions"
 MODEL=${MODEL:-claude-opus-4-5-20251001}
-EVAL_MAX_TOKENS=${EVAL_MAX_TOKENS:-16384}
+EVAL_MAX_TOKENS=${EVAL_MAX_TOKENS:-4096}
 
 # ── Tokenizer (for lm-eval token counting) ────────────────────────────────────
 NVFP4_TOKENIZER=$(ls -d "${HOME}/.cache/huggingface/hub/models--Salyut1--GLM-4.7-NVFP4/snapshots/"*/ 2>/dev/null | head -1 || true)
@@ -66,6 +72,29 @@ if ! curl -sf "${SERVER_BASE}/v1/models" >/dev/null 2>&1; then
   exit 1
 fi
 
+# ── Start buster-ripper (strips max_gen_toks + empty auth, injects enable_thinking=false) ──
+fuser -k "${PROXY_PORT}/tcp" 2>/dev/null || true
+sleep 0.3
+
+PROXY_PID=""
+cleanup() { [[ -n "${PROXY_PID}" ]] && kill "${PROXY_PID}" 2>/dev/null || true; }
+trap cleanup EXIT
+
+uv run "${BUSTER_RIPPER}" \
+  --upstream "${SERVER_BASE}" \
+  --port "${PROXY_PORT}" \
+  --host 127.0.0.1 \
+  --eval-mode \
+  --eval-max-tokens "${EVAL_MAX_TOKENS}" \
+  >/tmp/buster-ripper-eval.log 2>&1 &
+PROXY_PID=$!
+
+for i in $(seq 1 15); do
+  sleep 0.5
+  if curl -sf "${PROXY_URL}/v1/models" >/dev/null 2>&1; then break; fi
+done
+echo "buster-ripper listening on :${PROXY_PORT}"
+
 # ── Run ───────────────────────────────────────────────────────────────────────
 LIMIT_FLAG=""
 if [[ "${NUM_SAMPLES}" -gt 0 ]]; then
@@ -79,7 +108,7 @@ export HF_DATASETS_OFFLINE=1
 export HF_HUB_OFFLINE=1
 
 echo "GLM-4.7 quality eval — ${LABEL} — $(date '+%Y-%m-%d %H:%M')"
-echo "Server:    ${BASE_URL}  Model: ${MODEL}"
+echo "Server:    ${SERVER_BASE} (via proxy :${PROXY_PORT})  Model: ${MODEL}"
 echo "Tokenizer: ${TOKENIZER_PATH}"
 echo "Tasks:     ${TASKS}"
 echo "Samples per task: ${NUM_SAMPLES:-full}  Concurrent: ${NUM_CONCURRENT}"
@@ -92,7 +121,7 @@ uvx lm_eval run \
   --tasks "${TASKS}" \
   --apply_chat_template \
   --confirm_run_unsafe_code \
-  --gen_kwargs "max_tokens=${EVAL_MAX_TOKENS},chat_template_kwargs={\"enable_thinking\":false}" \
+  --gen_kwargs "max_tokens=${EVAL_MAX_TOKENS}" \
   --output_path "${OUTPUT_DIR}" \
   --log_samples \
   ${LIMIT_FLAG} \
