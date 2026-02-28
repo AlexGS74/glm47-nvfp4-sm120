@@ -23,7 +23,7 @@ PROXY_URL="http://127.0.0.1:${PROXY_PORT}"
 # lm-eval local-chat-completions posts directly to this URL
 BASE_URL="${PROXY_URL}/v1/chat/completions"
 MODEL=${MODEL:-claude-opus-4-5-20251001}
-EVAL_MAX_TOKENS=${EVAL_MAX_TOKENS:-1024}
+EVAL_MAX_TOKENS=${EVAL_MAX_TOKENS:-0}  # 0 = no limit
 
 # ── Tokenizer (for lm-eval token counting) ────────────────────────────────────
 # Matched to the model being evaluated so token budgets are accurate.

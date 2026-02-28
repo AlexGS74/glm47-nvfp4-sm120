@@ -12,7 +12,7 @@ Engine 000: Avg prompt throughput:     0.0 tokens/s, Avg generation throughput: 
 
 Patches and serve scripts to run [`Salyut1/GLM-4.7-NVFP4`](https://huggingface.co/Salyut1/GLM-4.7-NVFP4) and [`QuantTrio/GLM-4.7-AWQ`](https://huggingface.co/QuantTrio/GLM-4.7-AWQ) on **SM120 (RTX PRO 6000 Blackwell, RTX 5090)** hardware.
 
-**Working as of 2026-02-21 with vLLM 0.15.1. Tool calling confirmed working with Claude Code via Anthropic `/v1/messages` endpoint.**
+**Working as of 2026-02-28 with vLLM 0.16.0. Tool calling confirmed working with Claude Code via Anthropic `/v1/messages` endpoint.**
 
 SGLang is blocked by a checkpoint format incompatibility in v0.5.6/v0.5.7 — see `docs/sm120-blackwell-fp4-fixes.md` for details.
 
@@ -24,7 +24,7 @@ SGLang is blocked by a checkpoint format incompatibility in v0.5.6/v0.5.7 — se
 |---|---|
 | GPU | 4x NVIDIA RTX PRO 6000 Blackwell Max-Q (SM120, CC 12.0, 96 GiB each) |
 | Driver | 580.105.08 |
-| vLLM | 0.15.1 |
+| vLLM | 0.16.0 |
 | PyTorch | 2.9.1+cu128 |
 | flashinfer | 0.6.1 |
 | Python | 3.12 |
@@ -36,7 +36,7 @@ SGLang is blocked by a checkpoint format incompatibility in v0.5.6/v0.5.7 — se
 ### 1. Install vLLM
 
 ```bash
-uv tool install vllm==0.15.1
+uv tool install vllm==0.16.0
 ```
 
 ### 2. Apply patches
@@ -136,13 +136,26 @@ The patch to `glm4_moe.py` lives inside the vLLM install and is lost on reinstal
 
 ## Docs
 
-- [`docs/vllm-sm120-nvfp4-working-state.md`](docs/vllm-sm120-nvfp4-working-state.md) — full vLLM working state, errors encountered, startup sequence
+- [`docs/vllm-sm120-nvfp4-working-state.md`](docs/vllm-sm120-nvfp4-working-state.md) — full vLLM working state, errors encountered, startup sequence, benchmark results
 - [`docs/sm120-blackwell-fp4-fixes.md`](docs/sm120-blackwell-fp4-fixes.md) — SGLang investigation report, flashinfer regression history, upstream issue tracking
+- [`docs/quickstart.md`](docs/quickstart.md) — fast path to serving + benchmarking + quality evals
 
 ---
 
-## Status Notes (2026-02-21)
+## Status Notes (2026-02-28)
 
-The primary path to running GLM-4.7-NVFP4 on SM120 today is via **vLLM 0.15.1** with the included patches — this is confirmed working with tool calling via the Anthropic API.
+The primary path to running GLM-4.7-NVFP4 on SM120 today is via **vLLM 0.16.0** with the included patches — this is confirmed working with tool calling via the Anthropic API.
 
-**SGLang** has an upstream fix in commit `33c33a7de` ([#18546](https://github.com/sgl-project/sglang/pull/18546)) that addresses KV cache scale loading that previously required patching. However, the fundamental SM120 FP4 MoE backend issue remains unresolved in SGLang (no working backend: triton gives garbage, cutlass returns zeros, trtllm uses SM100-only cubins). See `docs/sm120-blackwell-fp4-fixes.md` for complete details.
+**AWQ vs NVFP4 throughput** (vLLM 0.16.0, 4× RTX PRO 6000, TP=4):
+
+| Concurrency | AWQ tok/s | NVFP4 tok/s |
+|-------------|-----------|-------------|
+| 1 | 80 | 54 |
+| 2 | 122 | 82 |
+| 4 | 209 | 143 |
+| 8 | 321 | 222 |
+| 16 | 492 | 356 |
+
+AWQ ~45% faster than NVFP4 at all concurrency levels. NVFP4 improved 12.5% from 0.15.1→0.16.0.
+
+**SGLang** has an upstream fix in commit `33c33a7de` ([#18546](https://github.com/sgl-project/sglang/pull/18546)) that addresses KV cache scale loading. However, the fundamental SM120 FP4 MoE backend issue remains unresolved (no working backend: triton gives garbage, cutlass returns zeros, trtllm uses SM100-only cubins). See `docs/sm120-blackwell-fp4-fixes.md` for complete details.
