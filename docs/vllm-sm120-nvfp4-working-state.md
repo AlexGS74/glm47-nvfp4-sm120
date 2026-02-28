@@ -189,26 +189,74 @@ elif origin_chunk.choices[0].delta.content is not None:
 
 ## Performance
 
-### Benchmarked throughput (thinking disabled, cold prefix cache)
+### Benchmarked throughput — 2026-02-28 (vLLM 0.16.0)
+
+Measured with `scripts/bench_serving.sh` using `vllm bench serve`, random dataset,
+512 input / 256 output tokens, 32 prompts per concurrency level, `/v1/completions` endpoint.
+
+**Configuration changes vs previous baseline:**
+- vLLM 0.15.1 → 0.16.0
+- `--compilation-config '{"level": 3, "cudagraph_mode": "full_and_piecewise"}'` added
+- `VLLM_WORKER_MULTIPROC_METHOD=spawn`, `VLLM_SLEEP_WHEN_IDLE=1`, `CUDA_DEVICE_ORDER=PCI_BUS_ID` added
+- `VLLM_MARLIN_USE_ATOMIC_ADD=1` added (AWQ only)
+- Benchmark endpoint changed from `/v1/chat/completions` → `/v1/completions` (chat endpoint breaks in 0.16.0 with random dataset)
+
+#### NVFP4 (Salyut1/GLM-4.7-NVFP4, modelopt_fp4, TRITON_ATTN, VLLM_CUTLASS MoE)
+
+| Concurrency | Sys tok/s | TPOT median ms | TTFT median ms | TTFT P99 ms |
+|---|---|---|---|---|
+| 1 | 54 | 18.63 | 155.86 | 472.86 |
+| 2 | 82 | 24.25 | 99.40 | 141.99 |
+| 4 | 143 | 28.00 | 117.45 | 188.83 |
+| 8 | 222 | 36.01 | 140.36 | 235.85 |
+| 16 | 356 | 44.98 | 162.77 | 246.21 |
+
+#### AWQ (QuantTrio/GLM-4.7-AWQ, awq_marlin, FLASHINFER, VLLM_CUTLASS MoE)
+
+| Concurrency | Sys tok/s | TPOT median ms | TTFT median ms | TTFT P99 ms |
+|---|---|---|---|---|
+| 1 | 80 | 12.57 | 137.71 | 186.63 |
+| 2 | 122 | 16.34 | 91.30 | 259.96 |
+| 4 | 209 | 19.13 | 97.07 | 287.01 |
+| 8 | 321 | 24.89 | 107.48 | 292.31 |
+| 16 | 492 | 32.55 | 172.48 | 304.00 |
+
+#### AWQ vs NVFP4 system throughput delta
+
+| Concurrency | NVFP4 | AWQ | AWQ advantage |
+|---|---|---|---|
+| 1 | 54 | 80 | **+48%** |
+| 2 | 82 | 122 | **+49%** |
+| 4 | 143 | 209 | **+46%** |
+| 8 | 222 | 321 | **+45%** |
+| 16 | 356 | 492 | **+38%** |
+
+AWQ consistently outperforms NVFP4 by ~45% at all concurrency levels on SM120.
+NVFP4 has higher quality (fewer quantization artifacts) but lower throughput — AWQ
+is the right choice when throughput matters more than maximum accuracy.
+
+### Benchmarked throughput — 2026-02-21 baseline (vLLM 0.15.1, NVFP4 only)
 
 Measured with concurrent async requests, `chat_template_kwargs: {enable_thinking: false}`,
 `stream_interval=1`, `max_num_batched_tokens=16384`, `CUDA_DEVICE_MAX_CONNECTIONS=1`.
 (Script default is now `32768`; benchmarks were run at `16384` to isolate the effect.)
 
-| Concurrency | System tok/s | Per-req tok/s | TTFT |
-|-------------|-------------|---------------|------|
-| 1 | 48 | 48 | 49 ms |
-| 2 | 62 | 45 avg | 46 ms |
-| 4 | 118 | 36 avg | 68 ms |
-| 8 | 203 | 31 avg | 126 ms |
+| Concurrency | System tok/s | TTFT |
+|-------------|-------------|------|
+| 1 | 48 | 49 ms |
+| 2 | 62 | 46 ms |
+| 4 | 118 | 68 ms |
+| 8 | 203 | 126 ms |
+
+**NVFP4 single-request improvement 0.15.1 → 0.16.0:** 48 → 54 tok/s (+12.5%).
+Attributed to compilation level 3 + full_and_piecewise cuda graph mode.
 
 System throughput scales well — MoE batching amortises expert dispatch across requests.
-Hasn't saturated at C=8; higher concurrency will continue to improve system throughput at the
+Hasn't saturated at C=16; higher concurrency will continue to improve system throughput at the
 cost of per-request speed.
 
-**Single-request decode:** ~52 tok/s measured via streaming ITL (with thinking enabled,
-TTFT 2.6 s includes thinking phase). GPU memory bandwidth utilisation ~90% of theoretical
-ceiling (22 GB weights/GPU at 1.28 TB/s → ~58 tok/s max). Not PCIe bottlenecked.
+**Single-request decode:** ~54 tok/s (0.16.0) / ~52 tok/s (0.15.1, streaming ITL with thinking).
+GPU memory bandwidth utilisation ~90% of theoretical ceiling (22 GB weights/GPU at 1.28 TB/s → ~58 tok/s max). Not PCIe bottlenecked.
 
 ### Interconnect
 
@@ -228,11 +276,12 @@ be dominated by silent thinking tokens (TTFT 2–3 s, visible tok/s ~4× lower).
 | Change | Effect |
 |--------|--------|
 | `--max-num-batched-tokens 16384` → `32768` | +72% at C=4, +126% at C=8 vs default; script default raised to 32768 |
+| `--compilation-config level 3 + full_and_piecewise` | +12.5% single-request decode (48→54 tok/s NVFP4) |
 | `CUDA_DEVICE_MAX_CONNECTIONS=1` | Marginal at C=1, helps at high concurrency |
 | Removing `--enable-log-requests/outputs` | ~5–10% across all concurrency levels |
 | `--stream-interval 5` | **Do not use** — causes stalls when `include_usage` is set; no throughput benefit |
 | `NCCL_P2P_DISABLE=1` | No measurable effect |
-| `--num-scheduler-steps` | Not available in vLLM 0.15.1 V1 engine (V1 async scheduling is equivalent and on by default) |
+| `--num-scheduler-steps` | Not available in vLLM V1 engine (V1 async scheduling is equivalent and on by default) |
 | MTP speculative decoding | 0% acceptance — neither NVFP4 checkpoint (Salyut1 or Tengyunw) includes MTP draft head weights |
 
 ### Logs during Claude Code usage (prefix cache warm)
