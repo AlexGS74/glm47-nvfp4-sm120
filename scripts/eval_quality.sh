@@ -24,6 +24,7 @@ PROXY_URL="http://127.0.0.1:${PROXY_PORT}"
 BASE_URL="${PROXY_URL}/v1/chat/completions"
 MODEL=${MODEL:-claude-opus-4-5-20251001}
 EVAL_MAX_TOKENS=${EVAL_MAX_TOKENS:-32768}
+THINKING_BUDGET=${THINKING_BUDGET:-8192}  # cap think block to prevent runaway loops
 
 # ── Tokenizer (for lm-eval token counting) ────────────────────────────────────
 # Matched to the model being evaluated so token budgets are accurate.
@@ -92,6 +93,7 @@ uv run "${BUSTER_RIPPER}" \
   --host 127.0.0.1 \
   --eval-mode \
   --eval-max-tokens "${EVAL_MAX_TOKENS}" \
+  --eval-thinking-budget "${THINKING_BUDGET}" \
   >/tmp/buster-ripper-eval.log 2>&1 &
 PROXY_PID=$!
 
