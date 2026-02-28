@@ -78,6 +78,10 @@ if ! curl -sf "${SERVER_BASE}/v1/models" >/dev/null 2>&1; then
 fi
 
 # ── Start buster-ripper in eval-mode (injects enable_thinking=false) ──────────
+# Kill any stale proxy on the eval port before starting a fresh one
+fuser -k "${PROXY_PORT}/tcp" 2>/dev/null || true
+sleep 0.3
+
 PROXY_PID=""
 cleanup() { [[ -n "${PROXY_PID}" ]] && kill "${PROXY_PID}" 2>/dev/null || true; }
 trap cleanup EXIT
