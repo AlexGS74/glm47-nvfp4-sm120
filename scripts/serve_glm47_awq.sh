@@ -42,6 +42,19 @@ export CUDA_DEVICE_MAX_CONNECTIONS=${CUDA_DEVICE_MAX_CONNECTIONS:-1}
 export NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE:-0}
 GPU_POWER_LIMIT=${GPU_POWER_LIMIT:-270}
 
+# ── Adopted from FP8 reference recipe ────────────────────────────────────────
+# spawn: safer than default fork with CUDA contexts (avoids worker deadlocks)
+export VLLM_WORKER_MULTIPROC_METHOD=${VLLM_WORKER_MULTIPROC_METHOD:-spawn}
+# AWQ uses Marlin kernels — atomic add fixes correctness issues on Blackwell
+export VLLM_MARLIN_USE_ATOMIC_ADD=${VLLM_MARLIN_USE_ATOMIC_ADD:-1}
+# Drop GPU to P8 between requests — free power win on idle
+export VLLM_SLEEP_WHEN_IDLE=${VLLM_SLEEP_WHEN_IDLE:-1}
+# Ensure GPU order matches nvidia-smi (important with CUDA_VISIBLE_DEVICES)
+export CUDA_DEVICE_ORDER=${CUDA_DEVICE_ORDER:-PCI_BUS_ID}
+# Compilation level 3 + full cuda graph — higher throughput; override with
+# COMPILATION_CONFIG='{"level":0}' to disable if startup time is an issue
+COMPILATION_CONFIG=${COMPILATION_CONFIG:-'{"level": 3, "cudagraph_mode": "full"}'}
+
 if [[ ! -x "${VLLM_BIN}" ]]; then
   echo "vllm not found: ${VLLM_BIN}" >&2
   echo "Install with: uv tool install vllm==0.15.1" >&2
@@ -115,6 +128,7 @@ exec "${VLLM_BIN}" serve "${MODEL_PATH}" \
   --quantization "${QUANTIZATION}" \
   --tensor-parallel-size "${TP}" \
   --attention-backend "${ATTENTION_BACKEND}" \
+  --compilation-config "${COMPILATION_CONFIG}" \
   --gpu-memory-utilization "${GPU_MEM_UTIL}" \
   --max-model-len "${MAX_MODEL_LEN}" \
   --max-num-seqs "${MAX_NUM_SEQS}" \

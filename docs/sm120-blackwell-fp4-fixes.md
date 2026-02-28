@@ -548,3 +548,16 @@ A workaround was identified in #2577: using `.float()` conversion when calculati
 **vLLM AWQ remains the correct path today.** The flashinfer attention PRs (#2561, #2598) are the closest to landing but address attention, not the MoE FP4 GEMM. No change to the serving stack is warranted until flashinfer #2577 closes.
 
 **Revisit trigger:** flashinfer #2577 closed, OR sglang #18954 closed with a confirmed fix.
+
+### Script Updates — 2026-02-28
+
+Adopted the following env vars from a confirmed-working FP8 reference recipe into
+`scripts/serve_glm47_nvfp4_vllm.sh` and `scripts/serve_glm47_awq.sh`:
+
+| Variable / Flag | Scripts | Reason |
+|---|---|---|
+| `VLLM_WORKER_MULTIPROC_METHOD=spawn` | both | Safer than `fork` with CUDA contexts; avoids deadlocks |
+| `VLLM_SLEEP_WHEN_IDLE=1` | both | GPU drops to P8 between requests — free power saving |
+| `CUDA_DEVICE_ORDER=PCI_BUS_ID` | both | GPU order matches nvidia-smi; avoids surprises with TP |
+| `--compilation-config '{"level":3,"cudagraph_mode":"full"}'` | both | Higher throughput via CUDA graph; overridable via `COMPILATION_CONFIG` |
+| `VLLM_MARLIN_USE_ATOMIC_ADD=1` | AWQ only | AWQ uses Marlin kernels; atomic add fixes correctness on Blackwell |

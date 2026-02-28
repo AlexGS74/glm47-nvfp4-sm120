@@ -49,6 +49,17 @@ export VLLM_LOGGING_LEVEL=${LOG_LEVEL:-INFO}
 export CUDA_DEVICE_MAX_CONNECTIONS=${CUDA_DEVICE_MAX_CONNECTIONS:-1}
 export NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE:-0}
 
+# ── Adopted from FP8 reference recipe ────────────────────────────────────────
+# spawn: safer than default fork with CUDA contexts (avoids worker deadlocks)
+export VLLM_WORKER_MULTIPROC_METHOD=${VLLM_WORKER_MULTIPROC_METHOD:-spawn}
+# Drop GPU to P8 between requests — free power win on idle
+export VLLM_SLEEP_WHEN_IDLE=${VLLM_SLEEP_WHEN_IDLE:-1}
+# Ensure GPU order matches nvidia-smi (important with CUDA_VISIBLE_DEVICES)
+export CUDA_DEVICE_ORDER=${CUDA_DEVICE_ORDER:-PCI_BUS_ID}
+# Compilation level 3 + full cuda graph — higher throughput; override with
+# COMPILATION_CONFIG='{"level":0}' to disable if startup time is an issue
+COMPILATION_CONFIG=${COMPILATION_CONFIG:-'{"level": 3, "cudagraph_mode": "full"}'}
+
 # ── GPU power limit (thermal management) ─────────────────────────────────────
 # RTX PRO 6000 Max-Q hits 89–91°C at full 300W during inference.
 # 250W keeps temps ~80–85°C with negligible decode performance impact
@@ -123,6 +134,7 @@ exec "${VLLM_BIN}" serve "${MODEL_PATH}" \
   --tensor-parallel-size "${TP}" \
   ${EXPERT_PARALLEL_FLAG} \
   --attention-backend "${ATTENTION_BACKEND}" \
+  --compilation-config "${COMPILATION_CONFIG}" \
   --gpu-memory-utilization "${GPU_MEM_UTIL}" \
   --max-model-len "${MAX_MODEL_LEN}" \
   --max-num-seqs "${MAX_NUM_SEQS}" \
