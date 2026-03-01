@@ -334,3 +334,152 @@ Grimulkan's data: 8 GPUs → 64 tok/s single request vs 4 GPUs → 79 tok/s. **W
 | convergence.ninja Max-Q build guide | https://convergence.ninja/post/blogs/000021-ToasterOnline.md |
 | DeepEP hybrid-ep (PCIe) | https://github.com/deepseek-ai/DeepEP/tree/hybrid-ep |
 | SuperMicro AS-4124GS-TNR (8x GPU) | https://www.theserverstore.com/supermicro-as-4124gs-tnr-4u-server.html |
+
+
+---
+
+## Feb 26, 2026 (continued) — New Members, Channel Expansion
+
+Following Festr's creation of #sglang and #vllm dedicated channels (responding to mudaG's suggestion at 12:55 PM), the afternoon brought a stream of new members.
+
+**Server growth:** chisleu posted the Discord link on r/BlackwellPerformance subreddit, triggering a flood of joins (including scammer bots, promptly banned). Notable new members:
+- **someguyinthesky**: Single RTX Pro 6000 + 9950X3D + 256GB DDR5-6000. "Y'all are really making me want to get another 6000 pro."
+- **t3rmina1**: Single GPU, only 512GB DDR4 2400 to pair.
+- **mtone**: Dual PCIe 5.0 x8 (7950X3D) setup. Notes nvtop bandwidth hits 25GB/s in rare heavy concurrent requests with large prompts. Recommends TR/EPYC for 4 cards or RAM offload.
+
+Community reaches critical mass. MOGUL suggests a #welcome channel to keep #general clean.
+
+---
+
+## Feb 27, 2026 — GPU Market Discussion; SM120 MXFP4; Model Recommendations
+
+### NVIDIA Rubin and NVLink Frustration
+
+**awgross** joins and becomes a key technical voice. Initial topic: NVIDIA's GPU roadmap.
+- "There's going to be an even bigger divergence between general compute GPU and AI GPUs based on how Rubin is shaping up."
+- **Festr**: "they really should get back the nvlink for prosumers — those fairytails that they wanted to add more cuda instead of nvlink.pffff"
+- **awgross**: "Warp MMA instruction — The segmenting of the SM100 vs 120 is really annoying... Leaves RTX 6000 as this weird stepchild. P2P yes but lacking other instructions. Going to have to learn to make my own to get MXFP4 working properly."
+
+awgross notes SM120 MXFP4 kernel status:
+> "Full speed PCIe5 is ok for training but don't really matter for inference"
+> "does anyone having working MXFP4 kernels for GPT-OSS on SM120? I've had a hell of a time with vLLM and SGLang due to the Blackwell SM confusion issues"
+
+**Festr** on PCIe performance vs model size: "it depends. Kimi 2.5 in prefill pushes 25GB/sec (50GB total) when doing prefill on 8 cards — but decoding 800MB/sec per card for a SINGLE request."
+
+### Procurement Discussion
+
+**blue** (building 8x RTX Pro 6000 in Canada): Asked about sourcing. Newegg works but 1 at a time. Community recommends Markets & Mayhem's supplier link.
+
+**ploopmaster**: Trying to get educational discount from NVIDIA — "giving me the run around."
+
+### Model Recommendations for 1-4 GPU Users (Festr)
+
+**Hurricane** asks: "I currently only have 1 RTX Pro 6000 but can maybe upgrade to 2 or even 4. What model and quantization are you recommending for 1x, 2x, 3x... RTX Pro 6000? I need 128k tokens context and at least 5 concurrent requests."
+
+**Festr's comprehensive response:**
+- 2 cards: MiniMax M2.5 with 100+ concurrent requests
+- 4 cards: Qwen 3.5-385B with at least 100 concurrent calls (not all in 128k context, but 5 for sure)
+- Also: GLM 4.7
+- Summary: "currently qwen35, minimax and glm47 are worth running"
+
+**Hurricane** follows up: "Is that smarter than Qwen3-Coder-Next 80B Q6_K_XL?" Festr: "absolutely" — points to architecture description for nvidia/Qwen3.5-397B-A17B-NVFP4.
+
+Hurricane reports: "Currently I'm running this in 1 card with awesome speed with 9x 128K context."
+
+**Festr**: "On 1 card I think that the Qwen3.5 122B-10A (or whatever it is) in NVFP4 will supersede it."
+
+---
+
+## Feb 28, 2026 — AWQ vs NVFP4; System Crashes; Evaluation Tools; AI Coding Agents
+
+### AWQ vs NVFP4 Activation Width Debate
+
+**orangezed**: "How do people feel about 16 bit vs 8 bit activations? AWQ vs NVFP4 experts?"
+
+**chisleu**: "I love my tokens.... tokens go brrrr" (preferring FP8 for more tokens)
+
+**orangezed**: "so you prefer 8 bit activations?"
+
+**Festr**: "When I tested AWQ vs NVFP4 — the later wins. But it's slower in single batch. I was testing MiniMax — but I might have flawed the testing, I let it evaluate Claude Code by crafting some basic tests."
+
+Community consensus solidifies: NVFP4 wins on quality, but AWQ may have a throughput advantage in some single-batch scenarios.
+
+### chisleu's System Crash + Ansible Migration
+
+**chisleu** reports a serious system crash:
+> "My system crashed hard last night. It would boot up but about 5 seconds after the console login would appear, the screen would go black and the system would be unresponsive."
+> "I hope it wasn't malware, but I nuked the whole system. Finally getting around to playing with Ansible (which is really cool BTW). I'm going to use Ansible to make rebuilding the system and getting models running easier since this platform has had 2 hard system crashes now..."
+
+chisleu shares Ansible playbook output (NVIDIA CUDA 13.0 + driver 590 installation). "Livin on the edge!"
+
+**Festr** on the crash: "nah, that's too paranoid. it will be your RAM issue"
+
+**chisleu**: "AMD Threadripper Pro 7995WX (96 cores of pure computational fury)" — confirms their system spec. Later analysis: BIOS reset fixed first crash; second crash suspected RAM issue, not malware.
+
+### Evaluation Framework Discussion
+
+**Festr** shares EleutherAI/lm-evaluation-harness: "so we can use this framework for evaluating various quants."
+
+**fearnworks**: "EleutherAI lm-eval harness is a very solid benchmark."
+
+**Eric P Sheets**: "Which benchmarks/evals do you typically use?" — sparking discussion about MMLU-Pro and other community eval scripts (connected to activity in #qwen-35 and #minimax-m25).
+
+### AI Coding Agents: Claude Code Takes Over
+
+A significant shift in the community conversation — multiple members discussing how AI coding agents (Claude Code specifically) are replacing manual infrastructure work.
+
+**Ixtrix**: "I can't believe I manually setup 2 VMs when I could just let Claude SSH in and do it for me..."
+
+**destroyed**: "lol been really hitting me today how it's been replacing everything I normally do. felt like yesterday laughing at scripts pasted from gpt3.5"
+
+**Festr**: "I have exactly same, I'm just doing some manual stuff / preparing dockers / virtuals realising I'm just losing time as the claude code do it instantly and more precisely"
+
+**Ixtrix**: "yeah it just setup a SearXNG, Crawl4AI, and Browser-Use isolated VM for my MCP stack"
+
+**destroyed**: "it's really the next batch of models after opus 4.6 has been out that we need — thing is just on a diff tier than anything else"
+
+**Ixtrix**: "I think the coding ability will trickle down into smaller models, but the harness / orchestration layer is where the closed source models will shine"
+
+---
+
+## Mar 1, 2026 — Browser-Use with Local Models; MTP Stability; Secondary Market Scams
+
+### Browser-Use: Qwen 3.5 397B as Driver Model
+
+Discussion of using self-hosted models for browser automation.
+
+**0ftf**: "What model are you using to drive your browser use?"
+
+**Ixtrix**: "Qwen 3.5 397B" (primary recommendation for browser-use tasks)
+
+**0ftf**: "Have you tried smaller models? Hoping to get browser-use working on a single 6k pro."
+
+**destroyed**: "You should try Qwen 3.5 35b or the 122b whatever you can fit. From what I see they should work based on benchmarks — the 397b crushes browser MCP usage currently for me."
+
+**Ixtrix**: "I was going to use the 122b and have my other 2 GPUs for OCR/TTS but I still need to build eval sets to see if 122b will work or not for my use case. The OCR Bench score, IF, long context just make the 397b too good not to use."
+
+**fearnworks**: "For the grounding thing, I've found sam3 as a tool to be REALLY effective — they added text conditioning for agent interaction."
+
+### MTP Speculative Decoding Stability (Festr)
+
+**chisleu**: "I'm waiting for the patches to get merged to fix tool calling, spec decoding, etc."
+
+**Festr**: "You do not need to — using mtp with :1 is still almost same gain and completely stable. And there is still an unresolved bug when it is >2 anyway (stability issue) so I would not go above 2 (like :2 max). Which is recommended on the model page anyway."
+
+**chisleu**: "I know. But I'm really satisfied with myself for getting GLM 4.7 with 200k context stood up with SGLang as a systemd service. I'm waiting for spec decode 5 to switch to Qwen 3.5."
+
+### Secondary Market: RTX 6000 Pro Pricing and Scams
+
+As hype grows, RTX 6000 Pro secondary market becomes active — with associated scams.
+
+**Sicario#2055**: "I saw an RTX 6000 on eBay in the $5500 range."
+
+**chisleu**: "I imagine that lots of people that don't really need one are going to buy one and sell it shortly after. There is so much hype — and openclaw made it worse. Keeping an eye out on eBay and such will probably yield some savings for those inclined to 2nd hand markets."
+
+**Festr** on the $5500 listing: "not bad price, but it's underpriced — I'm curious why they're selling for this price. It literally cost 10k."
+
+**someguyinthesky**: "I'd be careful, I see some listings for 6000 pro on eBay for $3000. Obvious scam."
+
+**root-754B-NVFP4.safetensors** (a member with an amusing username): "Scammers buy or steal old or abandoned eBay accounts that look legit and have some history before launching a bunch of high value items."
+
+Community advice: Use eBay's buyer protection. Never wire transfer. Verify seller feedback history.
