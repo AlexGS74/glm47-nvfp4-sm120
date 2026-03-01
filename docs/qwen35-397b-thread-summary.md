@@ -636,3 +636,123 @@ Status: "this is now my design — just testing it. It is working well so far"
 - AWQ vs NVFP4 quality benchmark — formal SWE-bench comparison still pending.
 - Festr's CCR vision routing proxy — working prototype, community interested.
 - mudaG's Qwen3.5-122B FP8 benchmark on 2x Pro 6000 — still pending results.
+
+
+## Mar 1, 2026 — CCR Vision Routing Architecture; vLLM Patch Dockerfile; Speed Records
+
+### Feb 28, Evening — Model Comparisons and Vision Discussion
+
+Following the CCR/routing work Festr had been developing, broader model comparison discussion begins:
+
+**kcramp**: "by my vibes, minimax is better than this [Qwen 3.5], keeps losing context and being confidently incorrect. Maybe system prompt issue — idk if I can do like a 'if you are not sure, ASK, do not assume'"
+
+**Qu FRAG**: "If only Minimax had native vision" — sparking a thread about MiniMax 3.
+
+**Ixtrix**: "They said MiniMax 3 might [have vision], if I recall their twitter post correctly"
+
+**Ixtrix**: "how hard is it to just add a vision model for routing though?" — foreshadowing the architecture Festr is building.
+
+**Festr** announces his approach:
+> "this is exactly what I'm trying to solve - my claude code is now connected to my GLM5 and I'm trying to solve via transparent routing if the vision can be routed to the qwen3.5 small model"
+
+### Mar 1, 00:41 AM — Festr's CCR Split-Brain Architecture Announcement
+
+**Festr posts a comprehensive write-up** of his Claude Code vision routing design:
+
+> **Claude Code with split text/vision architecture via claude-code-router**
+>
+> Running Claude Code against local/self-hosted models through @musistudio/claude-code-router (CCR). The setup uses a split-brain architecture for image handling:
+>
+> **Text model (main brain)** — any OpenAI-compatible model (via sglang, vllm, etc.) that handles all reasoning, code generation, tool use. Doesn't need to be multimodal. Images in the conversation are replaced with [Image #N] placeholders.
+>
+> **Vision model (eyes)** — a smaller multimodal model (e.g. Qwen3.5-27B) running on a separate machine. Only gets called when the text model needs to look at an image.
+>
+> **How it works:**
+> 1. User sends a message with an image (e.g. a screenshot from Claude Code's Read tool)
+> 2. CCR strips the image, caches it, injects [Image #N] placeholder + analyzeImage tool
+> 3. Text model sees the placeholder, decides it needs to look at the image, calls analyzeImage with a task ("describe the UI layout") and context ("user is asking about a CSS bug")
+> 4. CCR's streaming interceptor catches the tool call mid-stream, sends the image + task to the vision model
+> 5. Vision model returns a text description
+> 6. CCR automatically makes a follow-up request to the text model with the description
+> 7. Client receives one seamless streaming response — thinking → answer, no visible round-trip
+
+**Festr**: "this is now my design - just testing it. It is working well so far"
+
+Discussion about vision + image context management followed:
+
+- **kcramp**: Uses an MCP tool calling a different PC for OCR instead of routing
+- **Festr**: Prefers transparent proxy over MCP ("it eats tokens and is not universal as it could be")
+- **el8**: "I think LiteLLM can go a long way to doing this"
+- **Ixtrix**: Shares their own stateful image forgetting architecture — maintains a table of image descriptions injected into context, model can request to "pull back" an image when needed
+
+Festr's concern: "images are polluting context pretty quickly when working with MCP playwright and longer debug sessions — I was always interested how claude code maintains multiturn with images"
+
+Ixtrix on their approach: "when the model has over 30 pictures uploaded or the conversation has gone over a certain context count, it unloads the pictures, injecting [file | short description | stated (loaded|forgotten)] then based on context if it decides it needs the image it can call a tool that pulls it back into main context"
+
+**Festr**: "maybe I should really wait for the DS4 release so I'm not chasing ghosts" — reflecting on whether to wait for DeepSeek 4 instead
+
+### Mar 1, Morning — Unsloth Update + Community Traction
+
+**Marky**: "I'd love to figure this out for opencode/pi" (CCR vision routing)
+
+**Festr**: "I will release mine vibe coded proxy once this design will be proven to work"
+
+**Marky** reports: Tried Qwen3.5-27B on Strix Halo for vision, but "just too slow" — can't co-run with M2.5 NVFP4 on the same GPUs.
+
+**Marky** shares: "Unsloth updated their quants of 35, and improved the chat template" — Unsloth NVFP4 getting better.
+
+**Festr** to Marky: "what was the speed? Im getting 70 tok/sec" — referring to Qwen3.5 on their setup.
+
+### Mar 1, Afternoon — vLLM Patch Dockerfile; Speed Records
+
+**Context:** Qwen 3.5 still requires cherry-picked patches to work reliably in vLLM nightly.
+
+**orangezed** reminds: "Qwen35 requires two PRs cherry picked last I checked, see forum"
+
+**Lavd**: Confirms — `git cherry-pick PR #35219 PR #35421` — but main branch may have changed, introducing new challenges.
+
+**orangezed** shares their full **production Dockerfile** for patched vLLM:
+
+```dockerfile
+FROM vllm/vllm-openai:cu130-nightly
+
+# Install patch utility
+RUN apt-get update && apt-get install -y --no-install-recommends patch && rm -rf /var/lib/apt/lists/*
+
+# Apply PR #35219 (FlashInfer accuracy fix - zero freed KV cache blocks)
+COPY pr35219.patch /tmp/
+RUN cd /usr/local/lib/python3.12/dist-packages && patch -p1 < /tmp/pr35219.patch
+
+# Apply PR #35581 (Fix Qwen3_5MTP packed_modules_mapping for gate_up_proj)
+COPY pr35581.patch /tmp/
+RUN cd /usr/local/lib/python3.12/dist-packages && patch -p1 < /tmp/pr35581.patch
+
+# Apply PR #35615 (Fix Qwen3Coder streaming tool parser for speculative decode)
+COPY vllm-fix/tool_parsers/qwen3coder_tool_parser.py /usr/local/lib/python3.12/dist-packages/vllm/tool_parsers/qwen3coder_tool_parser.py
+COPY vllm-fix/chat_completion/serving.py /usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/chat_completion/serving.py
+
+# Auto-patch config.json to add mtp.fc to quantization ignore list
+COPY patch_config.py /opt/patch_config.py
+COPY entrypoint.sh /opt/entrypoint.sh
+RUN chmod +x /opt/entrypoint.sh
+
+ENTRYPOINT ["/opt/entrypoint.sh"]
+```
+
+**PRs applied:**
+- **#35219**: FlashInfer accuracy fix — zero freed KV cache blocks
+- **#35581**: Fix Qwen3_5MTP `packed_modules_mapping` for gate_up_proj
+- **#35615**: Fix Qwen3Coder streaming tool parser for speculative decode
+
+**chisleu** posts a speed benchmark — Qwen 3.5 benchmarks "profoundly faster" than SGLang GLM 4.7:
+
+```
+📊 Success Rate: 3/3 (100.0%)
+⚡ Performance Metrics:
+  TTFT: 52.37s avg (38.99s min, 77.18s max) — 🔴 Slow (high context queries)
+  TPS:  68.4 tok/s avg (68.1 min, 68.5 max) — 🟢 Excellent
+  Tokens: 671 generated
+Context: ~170k tokens per query
+```
+
+**Context window:** Qwen 3.5 max_model_len = 262,144 tokens (confirmed by chisleu and orangezed).
