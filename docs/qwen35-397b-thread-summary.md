@@ -443,3 +443,196 @@ Full config in recipes file under "Recipe 9 — Ixtrix's Full Video + Tool Call 
 | Benchmark comparison 122b vs 397b | https://qwen122-vs-397-20260224-1154.surge.sh |
 | OpenCode non-streaming PR | https://github.com/anomalyco/opencode/pull/14786 |
 | vLLM official Qwen3.5 recipe | https://docs.vllm.ai/projects/recipes/en/latest/Qwen/Qwen3.5.html |
+
+
+
+### Feb 26 — Unsloth NVFP4 Quants Released + MTP=5 at 150 tok/s Confirmed
+
+**Quants available (Sehyo on HuggingFace):**
+- Sehyo/Qwen3.5-122B-A10B-NVFP4 (71B VRAM, 37k+ downloads — most popular)
+- Sehyo/Qwen3.5-35B-A3B-NVFP4 (4.6k downloads)
+- Sehyo/Qwen3.5-397B-A17B-NVFP4 (2.45k downloads)
+
+**MTP=5 at 150 tok/s confirmed by WWM:**
+- qwen3_next_mtp with spec_tokens=2 gives a noticeable speed bump.
+- 125-140 tok/s for code gen.
+- At 100 concurrent sessions: 2400 tok/sec aggregate. 200k context: 100-105 tok/s still solid.
+
+**Festr's complete working vLLM docker command (cu130-nightly + all patches):**
+- Full docker alias with collective_fusion patch, tool parser fix, and all recommended flags.
+- Key patches volume-mounted from host: collective_fusion.py, serving.py, qwen3coder_tool_parser.py
+- Includes --media-io-kwargs for video input and --speculative-config qwen3_next_mtp with num_speculative_tokens=2.
+- See recipes file for the full docker command.
+
+**Tool call streaming fix merged:**
+- Festr: New PR #35615 created to replace older PR (closed old one), fixing Qwen3Coder tool call parser.
+- "[Bugfix] Fix Qwen3Coder tool call streaming with speculative decoding" — fixes broken tool call JSON when using qwen3_coder parser + MTP.
+- Also relevant: "[Bugfix] Use 'sum' reduction instead of 'avg' in Async TP reduce-sc..." (PR #33088) for correct multi-GPU reduce.
+
+
+### Feb 27 AM — orangezed's Clean Recipe + Critical Config Fix
+
+**Key insight: mtp.fc must be added to quantization_config.ignore in config.json:**
+```json
+"ignore": [...existing entries..., "mtp.fc"]
+```
+Without this, vLLM tries to load the MTP projection layer as NVFP4-quantized but it is actually BF16, causing a shape mismatch crash.
+
+**orangezed's consolidated MTP=5 recipe (clean python launch):**
+```bash
+python3 -m vllm.entrypoints.openai.api_server \
+  --model /path/to/Qwen3.5-397B-A17B-NVFP4 \
+  --tensor-parallel-size 4 \
+  --gpu-memory-utilization 0.80 \
+  --max-num-batched-tokens 4092 \
+  --max-num-seqs 128 \
+  --trust-remote-code \
+  --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":5}'
+```
+Result: ~150 tok/s decode (batch 1) on 4x Blackwell, up from ~75 tok/s without MTP.
+
+**vLLM build (orangezed):**
+- Base: any recent main (ec8f943db, ~Feb 26 2026).
+- Cherry-pick PR #35219 (FlashInfer accuracy fix for Blackwell) and PR #35421 (tool call streaming fix).
+- PR #35219 needed for correctness on Blackwell. PR #35421 only needed for MTP>1 + tool calling.
+
+**Ixtrix docker-compose.yml variant (also confirmed working):**
+- Uses custom vllm-qwen35-mtp Docker image, NVIDIA_VISIBLE_DEVICES=4,5,6,7 (GPUs 4-7).
+- Includes --tool-call-parser qwen3_coder, --reasoning-parser qwen3, --mm-encoder-tp-mode data.
+- --speculative-config with qwen3_next_mtp, num_speculative_tokens=5.
+- Result: ~150 tok/s decode at batch 1 on 4x Blackwell (vs ~75 tok/s without MTP).
+
+**Video/image input confirmed by Ixtrix at 4:58 PM**: "video works great"
+- orangezed confirms images working too. Video not tested by orangezed.
+
+**Thinking/reasoning tag fix:**
+- Ixtrix: vLLM does NOT enable thinking by default. Must pass explicitly:
+  `extra_body["chat_template_kwargs"] = {"enable_thinking": thinking}`
+- Without this flag, model outputs no think tags even though it thinks internally.
+
+**Ixtrix MTP=3 vs MTP=5 benchmark (from fixed NUMA nodes):**
+- MTP=3: Algorithm 2048 tokens, 1 req = 17.9s / 114.4 tok/s; 4 req = 25.9s / 316.0 tok/s; Debugging 1024 tok, 1 req = 8.8s / 116.9 tok/s
+- MTP=5: Algorithm 2048 tokens, 1 req = 40.5s / 41.7 tok/s; 4 req = 26.2s / 313.0 tok/s; Debugging 1024 tok, 8 req = 8.0s / 641.9 tok/s
+- MTP=5 wins at higher concurrency / batched scenarios.
+
+**Shibe still in Japan (confirmed 1:30 PM)**: "Not yet Im still in Japan lol Until sunday" — MTP layer update for Unsloth NVFP4 quants pending.
+
+**kcramp's docker setup shared**: configs posted publicly, search config.json in channel history.
+
+**PR #35581 committed (Feb 28 3:37 AM)**: "Fix Qwen3_5MTP packed_modules_map..." — fixes the packed_modules_mapping in Qwen3_5MTP class where gate_up_proj incorrectly included down_proj instead of gate_proj. Enables the intended fused MLP kernel path, improving throughput by 2-8% depending on batch size and sequence length.
+
+
+### Feb 27 PM — Performance Comparison; Unsloth Chat Template Fix
+
+**Qu FRAG's abysmal speeds explained (port 1235 config):**
+- 500-token speedtest: 0 context 1 req = 12.0 tok/s, 8 req = 164.0 tok/s; 16k context 1 req = 70.6 tok/s, 8 req = 216.6 tok/s
+- Root cause: PCIe Gen 3 (not Gen 5). kcramp confirms: "my 50-70 tok/s is with PCIe3 lol — iirc the pcie only matters for loading the models"
+- Ixtrix: on Threadripper PRO 9975WX with 4x Max Q's, proxmox host, 4 NUMA nodes on the VM.
+
+**Compare: Ixtrix's good config (port 8000):**
+- 500-token speedtest: 0 context 1 req = 59.1 tok/s, 8 req = 568.7 tok/s; 16k context 1 req = 108.8 tok/s, 8 req = 466.6 tok/s
+
+**VLLM_USE_V2_MODEL_RUNNER=1 flag** — Festr asks if anyone tried it. Unclear if beneficial.
+
+**Unsloth chat template fix (7:19-7:37 PM):**
+- darkstar000 spots Unsloth LinkedIn post: "Qwen3.5 is now updated with improved tool-calling & coding performance!"
+- Unsloth: "Qwen3.5 should now produce better tool-calling & coding outputs after we fixed the model's chat template. Improves all variants, no matter quant type or..."
+- Festr: "they literally fixed it, worth try compare their and vanilla"
+- darkstar000: "qwen updated their chat template, will give it a shot"
+- Qu FRAG: "Unsloth fixes might only apply to their ggufs"
+
+**Festr benchmark comparison table posted (image, 7:31 PM):**
+- Qwen vs GLM5 vs Kimi vs "Leader" across GPQA Diamond, HLE, IFBench, AA-LCR, GDPval-AA, CriPr, SciCode, Terminal-Bench Hard, AA-Omniscience, AA-Hallucination Rate.
+- Qwen leads on GPQA Diamond (69.2%), IFBench (78.8%), AA-LCR (65.7%), GDPval-AA (35.4%).
+- kcramp: "i really dont like how it ignored plan mode sometimes" — Festr: "is it because of the nvfp4?"
+
+**Mixed precision insight (Festr, 7:33 PM):**
+> "Quantizing any attn_* is especially sensitive for hybrid architectures, and so leaving them in higher precision works well — maybe worth trying to create mixed precision quant leaving sensitive layers in high precision and nvfp4 only for those which are not that sensitive"
+
+**Qu FRAG: "Friends don't let friends run ggufs on rtx6k"** — community motto established.
+
+
+### Feb 27 Night — Tool Call Fix Posted; NUMA Topology; Performance Debugging
+
+**darkstar000 at 10:34 PM**: "fixed the vllm thinking, getting 80 token/s with the newer cu130-nightly"
+
+**Tool calls broken with MTP confirmed by darkstar000 at 10:37 PM.**
+- Ixtrix at 11:00 PM: "there has been a fix posted for this"
+- kcramp: "im not using thinking at all fyi — only nothink. I saw some benchmark that said think was worse"
+
+**NUMA topology affecting performance:**
+- orangezed at 10:51 PM: "wow just tried two different computers, both TP=4 with rtx6k and one goes through CPU interconnect (can't do full TP=4 through PCIe host bridge) — it gets 60 tok/s VS the 100-150 when on same PCIe interconnect"
+- Confirms: GPU interconnect topology is critical. Direct PCIe connections dramatically outperform CPU-bridged setups.
+
+**orangezed at 11:54 PM**: "what are these patches to collective_fusion, tool_parser, etc?" — still learning the patch system.
+
+
+### Feb 28 Early Morning — YouTube Review + Kernel Fix
+
+**Qu FRAG at 2:19 AM** shares YouTube video: "Is Bigger Better? EVERY Qwen 3.5 Local AI Compared — 397B vs 122B v..." (xCreate channel).
+
+**PR #35581 merged**: Fix Qwen3_5MTP packed_modules_mapping — 2-8% throughput improvement for MTP models.
+
+**Ixtrix at 8:45 AM** posts MTP=3 vs MTP=5 benchmark (with fixed NUMA nodes):
+- MTP=5 wins at higher concurrency. MTP=3 better for single-request latency in some scenarios.
+- Mixed Load (4x1024 tokens): MTP=3 = 15.2s / 309.8 tok/s; MTP=5 = 11.4s / 360.8 tok/s.
+
+
+### Feb 28 AM — PR #35615 + AWQ Quality Debate
+
+**Festr at 11:08 AM**: "vibe coded better patch for the tool calling which was still failing. I have closed the old one, created new PR: https://github.com/vllm-project/vllm/pull/35615"
+- chisleu: "I think @Festr is a clawbot running some secret government AGI"
+
+**AWQ quality vs NVFP4 debate:**
+- darkstar000: "the AWQ has been more reliable and consistent for me so far lol"
+- Festr: "I think we need exact proof for this — doing all the SWE bench verified or whatever replicated tests would be nice"
+- darkstar000: "could run some benchmarks against each — the AWQ seems to capture more details when copying a screenshot of a UI"
+- AWQ quant done by QuantTrio. Festr: "unsloth does not have something similar to the AWQ? I'm curious why unsloth is not providing nvfp4 quants — it looks like they know what they are doing."
+- darkstar000: "yeah I won't even bother with a gguf anymore" (after Qu FRAG's "friends don't let friends run ggufs")
+- Shibe at 1:01 PM: "Running gguf on gpu? Wtf" (Shibe returned from Japan)
+
+**Festr at 2:17 PM** shares EleutherAI lm-evaluation-harness: https://github.com/EleutherAI/lm-evaluation-harness
+- fearnworks at 4:05 PM: "eleuther lm eval harness is a very solid benchmark"
+
+
+### Feb 28 PM — Vision Routing Proxy + Claude Code Architecture
+
+**Vision routing discussion (5:17-7:42 PM):**
+
+Festr's goal: route vision requests from Claude Code (running against GLM5) transparently to a smaller vision model (Qwen3.5-27B) without modifying the client.
+
+**Ixtrix approach (shared at 7:30 PM):**
+- When conversation exceeds 30 images or hits context window limit, model unloads pictures but injects a table: `| filename | short description | status (loaded|forgotten) |`
+- Model can call a tool to pull an image back into context if needed.
+- "also its only 1000 tokens per image, at 256k thats not a problem with smart management"
+
+**Festr's Claude Code with split text/vision architecture via claude-code-router (CCR) — posted 7:41 PM:**
+
+Architecture: "split-brain" — text model handles all reasoning, vision model only called on demand.
+
+How it works:
+1. User sends message with image (e.g., screenshot from Claude Code Read tool)
+2. CCR strips the image, caches it, injects [Image #N] placeholder + analyzeImage tool
+3. Text model (Qwen3.5-397B, GLM5, or any OpenAI-compatible model via sglang/vllm) sees placeholder, calls analyzeImage with task + context
+4. CCR's streaming interceptor catches the tool call mid-stream, sends image + task to vision model
+5. Vision model (e.g., Qwen3.5-27B) returns text description
+6. CCR makes follow-up request to text model with description
+7. Client receives one seamless streaming response — thinking → answer, no visible round-trip
+
+Status: "this is now my design — just testing it. It is working well so far"
+
+**Context on GLM5 + next steps:**
+- Ixtrix: "until GLM5.5 comes out and you need a vision model again"
+- Festr: "next glm will have vision, impossible to not have vision in next glm release"
+- Festr: "the images are polluting context pretty quickly when working with mcp playwright and some longer debug sessions"
+
+
+---
+
+## Open Questions / Next Steps (as of Feb 28, 2026 ~7:42 PM)
+
+- PR #35615 (new Festr tool call fix) — needs community testing and merge.
+- Unsloth NVFP4 quants with MTP layer — Shibe said "Until Sunday" (now back from Japan, should be available).
+- AWQ vs NVFP4 quality benchmark — formal SWE-bench comparison still pending.
+- Festr's CCR vision routing proxy — working prototype, community interested.
+- mudaG's Qwen3.5-122B FP8 benchmark on 2x Pro 6000 — still pending results.
