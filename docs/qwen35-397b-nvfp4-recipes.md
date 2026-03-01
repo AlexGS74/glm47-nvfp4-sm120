@@ -464,3 +464,142 @@ async def proxy(request: Request):
 - **HF discussion thread:** https://huggingface.co/vincentzed-hf/Qwen3.5-397B-A17B-NVFP4/discussions/1
 - **Benchmark comparison (122b vs 397b):** https://qwen122-vs-397-20260224-1154.surge.sh
 - **Qwen 3.5 FP8 quant (community):** https://huggingface.co/Shifusen/Qwen3.5-122B-A10B-FP8
+
+
+---
+
+## Recipe 9 — orangezed's Clean Python Launch (MTP=5, ~150 tok/s, Feb 27)
+
+> **Status:** Confirmed working on 4x Blackwell. Cleanest minimal recipe for MTP=5.
+> **Prerequisite:** Add "mtp.fc" to quantization_config.ignore in config.json (see Critical Config Fixes below).
+
+```bash
+python3 -m vllm.entrypoints.openai.api_server \
+  --model /path/to/Qwen3.5-397B-A17B-NVFP4 \
+  --tensor-parallel-size 4 \
+  --gpu-memory-utilization 0.80 \
+  --max-num-batched-tokens 4092 \
+  --max-num-seqs 128 \
+  --trust-remote-code \
+  --speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":5}'
+```
+
+**Result:** ~150 tok/s decode (batch 1) on 4x Blackwell, up from ~75 tok/s without MTP.
+
+**vLLM build:** Any recent main (~ec8f943db, Feb 26 2026). Cherry-pick:
+- PR #35219 — FlashInfer accuracy fix for Blackwell GPUs (needed for correctness)
+- PR #35421 — Fixes tool call streaming with num_speculative_tokens > 1 (only if using tool calls + MTP)
+
+---
+
+## Recipe 10 — Ixtrix's Full Docker Alias with Patch Files Volume-Mounted (Feb 27)
+
+> **Status:** Confirmed working. Includes all patches for tool calls, collective_fusion, and video input.
+> **Note:** Uses cu130-nightly image. Patches are mounted from host paths.
+
+```bash
+alias qwen-vllm-mtp='
+docker stop vllm-ava-397b 2>/dev/null;
+docker rm vllm-ava-397b 2>/dev/null;
+docker run -d \
+  --name vllm-ava-397b \
+  --runtime=nvidia \
+  --ipc=host \
+  --shm-size=16g \
+  -p 8000:8000 \
+  -e NVIDIA_VISIBLE_DEVICES=0,1,2,3 \
+  -e NVIDIA_DRIVER_CAPABILITIES=all \
+  -e LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/local/nvidia/lib64:/usr/local/cuda/lib64 \
+  -e NCCL_P2P_LEVEL=4 \
+  -e NCCL_IB_DISABLE=1 \
+  -e OMP_NUM_THREADS=6 \
+  -e SAFETENSORS_FAST_GPU=1 \
+  -e VLLM_WORKER_MULTIPROC_METHOD=spawn \
+  -v /models/Qwen3.5-397B-A17B-NVFP4-custom-config.json:/model/config.json:ro \
+  -v /models/Qwen3.5-397B-A17B-NVFP4:/model:ro \
+  -v ~/vllm-fix/fusion/collective_fusion.py:/usr/local/lib/python3.12/dist-packages/vllm/compilation/passes/fusion/collective_fusion.py:ro \
+  -v ~/vllm-fix/chat_completion/serving.py:/usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/chat_completion/serving.py:ro \
+  -v ~/vllm-fix/tool_parsers/qwen3coder_tool_parser.py:/usr/local/lib/python3.12/dist-packages/vllm/tool_parsers/qwen3coder_tool_parser.py:ro \
+  vllm/vllm-openai:cu130-nightly \
+  --model /model \
+  --host 0.0.0.0 \
+  --port 8000 \
+  --trust-remote-code \
+  --tensor-parallel-size 4 \
+  --gpu-memory-utilization 0.90 \
+  --max-model-len 262144 \
+  --max-num-seqs 8 \
+  --mm-encoder-tp-mode data \
+  --mm-processor-cache-type shm \
+  --media-io-kwargs '"'"'{"video": {"num_frames": -1}}'"'"' \
+  --enable-auto-tool-choice \
+  --tool-call-parser qwen3_coder \
+  --reasoning-parser qwen3 \
+  --enable-prefix-caching \
+  --speculative-config '"'"'{"method":"qwen3_next_mtp","num_speculative_tokens":2}'"'"' \
+  --served-model-name Qwen3.5-397B-A17B-NVFP4 Qwen3'
+```
+
+**Note from Ixtrix:** "i had to add some custom commands because GPUs dont like my VM setup"
+- Uses custom config.json mounted separately (with mtp.fc in ignore list)
+- Patch files mounted from ~/vllm-fix/ directory on host
+
+**config.json snippet (required for MTP to work):**
+```json
+{
+  "architectures": ["Qwen3_5MoeForConditionalGeneration"],
+  "dtype": "bfloat16",
+  "image_token_id": 248056,
+  ...
+}
+```
+
+---
+
+## Critical Config Fix — mtp.fc in quantization_config.ignore (Feb 27)
+
+> **Required for MTP=5 on NVFP4 models.** Without this, vLLM crashes with shape mismatch error.
+
+Edit `config.json` in the model directory. Add **"mtp.fc"** to quantization_config.ignore:
+
+```json
+{
+  "quantization_config": {
+    "ignore": [
+      ...existing entries...,
+      "mtp.fc"
+    ]
+  }
+}
+```
+
+**Why:** vLLM tries to load the MTP projection layer as NVFP4-quantized, but it is actually BF16 in the checkpoint. This causes a shape mismatch crash. Adding it to the ignore list tells vLLM to leave it in BF16.
+
+---
+
+## Thinking Mode Fix — enable_thinking Flag (Feb 27)
+
+> vLLM does NOT enable thinking tags by default. Must pass explicitly via extra_body.
+
+```python
+# In your API call:
+extra_body = {"chat_template_kwargs": {"enable_thinking": True}}
+
+# Or for no-thinking mode:
+extra_body = {"chat_template_kwargs": {"enable_thinking": False}}
+```
+
+**Without this flag:** model thinks internally but outputs no think tags. The inference still works but thinking is suppressed in output.
+
+---
+
+## Useful Links — Updated (Feb 28, 2026)
+
+- **PR #35219** (FlashInfer accuracy fix, Blackwell): https://github.com/vllm-project/vllm/pull/35219
+- **PR #35421** (tool call streaming + MTP>1 fix): https://github.com/vllm-project/vllm/pull/35421
+- **PR #35581** (MTP kernel fix, 2-8% throughput improvement): https://github.com/vllm-project/vllm/pull/35581
+- **PR #35615** (Festr's new tool call fix): https://github.com/vllm-project/vllm/pull/35615
+- **PR #33088** (Async TP sum reduction fix): https://github.com/vllm-project/vllm/pull/33088
+- **EleutherAI lm-evaluation-harness:** https://github.com/EleutherAI/lm-evaluation-harness
+- **Sehyo NVFP4 quants (122B popular):** https://huggingface.co/Sehyo/Qwen3.5-122B-A10B-NVFP4
+- **YouTube: 397B vs 122B comparison (xCreate):** https://youtu.be/OE5KdF4spss?si=BXH8oMsRDNS6XE5N
