@@ -44,6 +44,12 @@ FILES=(
   "tool_parsers/qwen3coder_tool_parser.py"
   "tool_parsers/qwen35coder_tool_parser.py"
   "entrypoints/openai/chat_completion/serving.py"
+  # KV cache block zeroing for MTP stability (PR #35219)
+  "v1/core/block_pool.py"
+  "v1/core/kv_cache_manager.py"
+  "v1/core/sched/output.py"
+  "v1/core/sched/scheduler.py"
+  "v1/worker/gpu_model_runner.py"
 )
 
 for rel in "${FILES[@]}"; do
