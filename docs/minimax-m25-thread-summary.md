@@ -213,3 +213,43 @@ Full table in recipes file.
 - NVFP4 coherence issues on single card (Qu FRAG) — intermittent and unreproducible.
 - Formal benchmark comparing NVFP4 vs AWQ speed/quality tradeoffs at scale.
 - MiniMax M3 / next version — no timeline in channel.
+
+
+### Mar 1, 2026 — MMLU-Pro Benchmark Discussion; Evaluation Scripts Shared
+
+Following Lavd's Feb 28 quality benchmark post showing NVFP4 at 86.2% vs original 85.8%:
+
+**Festr** raises the statistical question:
+> "this is within probability noise probably - if you run it multiple times do you get consistently better results with nvfp4? regarding MiniMaxAI/MiniMax-M2.5 — what kv cache?"
+
+**Marky HUNT** asks which script was used to run the benchmark.
+
+**Lavd** responds:
+> "Yes but it was temperature dependent for me. Actually, I sometimes even did better with abliterated version than stock."
+> "I find it's not useful though, because even coding benchmarks don't seem to align with actual agentic coding use performance"
+
+**Festr** confirms: "kv 16" (KV cache quantization at int16 was used in the benchmark).
+
+**Marky** shares his enhanced MMLU-Pro evaluation script (derived from MMLU-Pro repo, further enhanced with kimi2.5 and deepseek3.2 version):
+```bash
+source /data1/llama.env/bin/activate && python /data1/MMLU-Pro/evaluate_from_apiX-.py --url "[API_URL]" -m "m25nv" -n 16 -o "/data1/MMLU-Pro/eval_results_m25nv/" --retry 2 --max_tokens 48000 --retry_wrong 2
+
+python MMLU-Pro/evalshowpro.py -r /data1/MMLU-Pro/eval_results_m25nv/
+```
+
+**orangezed** adds the temperature parameters they use in their evaluation script:
+```python
+stream = await client.chat.completions.create(
+    model=args.model_name,
+    messages=full_messages,
+    temperature=0.1,
+    max_tokens=args.max_tokens,
+    top_p=0.95,
+    frequency_penalty=0,
+    presence_penalty=0,
+    stream=True,
+    stream_options={"include_usage": True},
+    extra_body={"top_k": 40}
+)
+```
+Note: `--retry_wrong 2` retries each wrong answer to reduce hallucination noise.
