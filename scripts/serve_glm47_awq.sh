@@ -57,7 +57,7 @@ COMPILATION_CONFIG=${COMPILATION_CONFIG:-'{"level": 3, "cudagraph_mode": "full_a
 
 if [[ ! -x "${VLLM_BIN}" ]]; then
   echo "vllm not found: ${VLLM_BIN}" >&2
-  echo "Install with: uv tool install vllm==0.15.1" >&2
+  echo "Install with: uv tool install vllm==0.16.0" >&2
   exit 1
 fi
 

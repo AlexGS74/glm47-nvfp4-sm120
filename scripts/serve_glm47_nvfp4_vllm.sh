@@ -94,7 +94,7 @@ Environment variables:
   MAX_NUM_SEQS        (default: 32)
   SWAP_SPACE          (default: 16)
   SERVED_MODEL_NAME   (default: claude-opus-4-5-20251001)  # spoofed so Claude Code renders thinking
-  SPEC_TOKENS         (default: 1)             # MTP speculative tokens; set to 0 to disable
+  SPEC_TOKENS         (default: 0)             # MTP speculative tokens; set to 1 to enable (disabled: 0% acceptance on NVFP4)
   LOG_LEVEL           (default: INFO)          # set to DEBUG for verbose output
 EOF
   exit 0
@@ -147,7 +147,7 @@ exec "${VLLM_BIN}" serve "${MODEL_PATH}" \
   --tool-call-parser glm47 \
   --reasoning-parser glm45 \
   --enable-auto-tool-choice \
-  # --enable-log-requests \   # uncomment to log full request/response text (adds overhead)
-  # --enable-log-outputs \
   --trust-remote-code \
   "$@"
+  # To enable full request/response logging, add to the command above:
+  #   --enable-log-requests --enable-log-outputs

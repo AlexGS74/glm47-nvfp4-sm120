@@ -3,12 +3,15 @@
 # Routes through buster-ripper (eval-mode) which:
 #   - strips max_gen_toks (lm-eval internal field; breaks response truncation if sent)
 #   - strips empty Bearer auth headers
-#   - injects chat_template_kwargs.enable_thinking=false
+#   - injects chat_template_kwargs.enable_thinking=true/false (EVAL_THINKING)
+#   - strips <think>...</think> blocks from content (eval path: clean OAI format)
+#   - strips code fences from content (build_predictions_instruct compat)
+#   - copies reasoning_content → content when content is empty (thinking mode)
 #
 # Usage:
-#   LABEL=awq      ./scripts/eval_quality.sh
-#   LABEL=nvfp4    ./scripts/eval_quality.sh
-#   LABEL=nvfp4 TASKS=gsm8k_cot_zeroshot ./scripts/eval_quality.sh
+#   LABEL=awq      ./scripts/eval_glm47.sh
+#   LABEL=nvfp4    ./scripts/eval_glm47.sh
+#   LABEL=nvfp4 TASKS=gsm8k_cot_zeroshot ./scripts/eval_glm47.sh
 #
 # Results saved to: ./evals/<LABEL>/
 
@@ -23,21 +26,24 @@ PROXY_URL="http://127.0.0.1:${PROXY_PORT}"
 BASE_URL="${PROXY_URL}/v1/chat/completions"
 MODEL=${MODEL:-claude-opus-4-5-20251001}
 EVAL_MAX_TOKENS=${EVAL_MAX_TOKENS:-4096}
-EVAL_THINKING=${EVAL_THINKING:-1}   # 1 = enable chain-of-thought; 0 = disable (faster)
+EVAL_THINKING=${EVAL_THINKING:-0}   # 0 = disable (faster, ~44%); 1 = enable thinking (no benefit seen)
 REPETITION_PENALTY=${REPETITION_PENALTY:-1.05}
 
 # ── Tokenizer (for lm-eval token counting) ────────────────────────────────────
 NVFP4_TOKENIZER=$(ls -d "${HOME}/.cache/huggingface/hub/models--Salyut1--GLM-4.7-NVFP4/snapshots/"*/ 2>/dev/null | head -1 || true)
 AWQ_TOKENIZER=$(ls -d "${HOME}/.cache/huggingface/models--QuantTrio--GLM-4.7-AWQ/snapshots/"*/ 2>/dev/null | head -1 || true)
+FP8_TOKENIZER=$(ls -d "${HOME}/.cache/huggingface/hub/models--zai-org--GLM-4.7-FP8/snapshots/"*/ 2>/dev/null | head -1 || true)
 
 if [[ -n "${TOKENIZER_PATH:-}" ]]; then
   : # already set by caller
+elif [[ "${LABEL:-}" == "fp8"* ]] && [[ -n "${FP8_TOKENIZER:-}" ]]; then
+  TOKENIZER_PATH="${FP8_TOKENIZER}"
 elif [[ "${LABEL:-}" == "awq"* ]] && [[ -n "${AWQ_TOKENIZER:-}" ]]; then
   TOKENIZER_PATH="${AWQ_TOKENIZER}"
 elif [[ "${LABEL:-}" == "nvfp4"* ]] && [[ -n "${NVFP4_TOKENIZER:-}" ]]; then
   TOKENIZER_PATH="${NVFP4_TOKENIZER}"
 else
-  TOKENIZER_PATH="${NVFP4_TOKENIZER:-${AWQ_TOKENIZER:-}}"
+  TOKENIZER_PATH="${FP8_TOKENIZER:-${NVFP4_TOKENIZER:-${AWQ_TOKENIZER:-}}}"
 fi
 
 if [[ -z "${TOKENIZER_PATH:-}" ]]; then
@@ -46,10 +52,14 @@ if [[ -z "${TOKENIZER_PATH:-}" ]]; then
 fi
 
 # ── Eval config ───────────────────────────────────────────────────────────────
-# humaneval_instruct: chat-formatted HumanEval (164 problems, pass@1)
-# mbpp_instruct:      chat-formatted MBPP (500 problems, pass@1)
-# gsm8k_cot_zeroshot: zero-shot chain-of-thought math (1319 problems)
-TASKS=${TASKS:-humaneval_instruct,mbpp_instruct,gsm8k_cot_zeroshot}
+# humaneval_instruct:          chat-formatted HumanEval (164 problems, pass@1)
+# mbpp_instruct:               chat-formatted MBPP (500 problems, pass@1)
+# gsm8k_cot_zeroshot:          zero-shot CoT math (1319 problems)
+# minerva_math500:             competition math, LaTeX answer matching (500 problems)
+# ifeval:                      verifiable instruction following (541 problems)
+# gpqa_diamond_cot_zeroshot:   PhD-level science reasoning (198 problems) — gated, needs HF login + access request
+# All tasks: thinking OFF (enable_thinking=false injected by glm47 profile)
+TASKS=${TASKS:-humaneval_instruct,mbpp_instruct,gsm8k_cot_zeroshot,minerva_math500,gpqa_diamond_cot_zeroshot,ifeval}
 
 # Number of samples per task — 0 = full eval
 NUM_SAMPLES=${NUM_SAMPLES:-0}
@@ -124,7 +134,7 @@ echo ""
 uvx lm_eval run \
   --model local-chat-completions \
   --model_args "model=${MODEL},base_url=${BASE_URL},tokenizer=${TOKENIZER_PATH},tokenizer_backend=huggingface,max_retries=3,timeout=300,num_concurrent=${NUM_CONCURRENT}" \
-  --tasks "${TASKS}" \
+  --tasks ${TASKS//,/ } \
   --apply_chat_template \
   --confirm_run_unsafe_code \
   --gen_kwargs "max_tokens=${EVAL_MAX_TOKENS},max_gen_toks=${EVAL_MAX_TOKENS},repetition_penalty=${REPETITION_PENALTY}" \
