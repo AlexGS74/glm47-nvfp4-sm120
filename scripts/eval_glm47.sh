@@ -14,6 +14,8 @@
 #   LABEL=nvfp4 TASKS=gsm8k_cot_zeroshot ./scripts/eval_glm47.sh
 #
 # Results saved to: ./evals/<LABEL>/
+# Note: lm-eval only writes results_*.json at the END of all tasks.
+# Use ONE_AT_A_TIME=1 to run each task separately so results save incrementally.
 
 set -euo pipefail
 
@@ -63,6 +65,9 @@ TASKS=${TASKS:-humaneval_instruct,mbpp_instruct,gsm8k_cot_zeroshot,minerva_math5
 
 # Number of samples per task — 0 = full eval
 NUM_SAMPLES=${NUM_SAMPLES:-0}
+
+# Run each task separately so results save after each one completes (safer for long runs)
+ONE_AT_A_TIME=${ONE_AT_A_TIME:-1}
 
 LABEL=${LABEL:-no-label}
 OUTPUT_DIR=${OUTPUT_DIR:-./evals/${LABEL}}
@@ -131,17 +136,30 @@ echo "Samples per task: ${NUM_SAMPLES:-full}  Concurrent: ${NUM_CONCURRENT}  Thi
 echo "Output:    ${OUTPUT_DIR}"
 echo ""
 
-uvx lm_eval run \
-  --model local-chat-completions \
-  --model_args "model=${MODEL},base_url=${BASE_URL},tokenizer=${TOKENIZER_PATH},tokenizer_backend=huggingface,max_retries=3,timeout=300,num_concurrent=${NUM_CONCURRENT}" \
-  --tasks ${TASKS//,/ } \
-  --apply_chat_template \
-  --confirm_run_unsafe_code \
-  --gen_kwargs "max_tokens=${EVAL_MAX_TOKENS},max_gen_toks=${EVAL_MAX_TOKENS},repetition_penalty=${REPETITION_PENALTY}" \
-  --output_path "${OUTPUT_DIR}" \
-  --log_samples \
-  ${LIMIT_FLAG} \
+LM_EVAL_COMMON=(
+  uvx lm_eval run
+  --model local-chat-completions
+  --model_args "model=${MODEL},base_url=${BASE_URL},tokenizer=${TOKENIZER_PATH},tokenizer_backend=huggingface,max_retries=3,timeout=300,num_concurrent=${NUM_CONCURRENT}"
+  --apply_chat_template
+  --confirm_run_unsafe_code
+  --gen_kwargs "max_tokens=${EVAL_MAX_TOKENS},max_gen_toks=${EVAL_MAX_TOKENS},repetition_penalty=${REPETITION_PENALTY}"
+  --log_samples
   --verbosity WARNING
+)
+[[ -n "${LIMIT_FLAG}" ]] && LM_EVAL_COMMON+=(${LIMIT_FLAG})
 
-echo ""
-echo "Results saved to: ${OUTPUT_DIR}"
+if [[ "${ONE_AT_A_TIME}" == "1" ]]; then
+  IFS=',' read -ra TASK_LIST <<< "${TASKS}"
+  for TASK in "${TASK_LIST[@]}"; do
+    TASK_OUT="${OUTPUT_DIR}/${TASK}"
+    mkdir -p "${TASK_OUT}"
+    echo "--- Task: ${TASK} — $(date '+%H:%M') ---"
+    "${LM_EVAL_COMMON[@]}" --tasks "${TASK}" --output_path "${TASK_OUT}"
+    echo "Results saved to: ${TASK_OUT}"
+    echo ""
+  done
+else
+  "${LM_EVAL_COMMON[@]}" --tasks ${TASKS//,/ } --output_path "${OUTPUT_DIR}"
+  echo ""
+  echo "Results saved to: ${OUTPUT_DIR}"
+fi
