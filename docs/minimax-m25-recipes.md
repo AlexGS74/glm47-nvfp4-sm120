@@ -334,3 +334,42 @@ python3 -m sglang.launch_server \
 - **vLLM benchmark suite (Qu FRAG):** https://github.com/shihanqu/vllm-benchmark-suite
 - **RTX6kPRO SGLang fused_moe benchmark issue:** https://github.com/sgl-project/sglang/issues/18870
 - **vLLM reasoning parser bug report:** https://github.com/vllm-project/vllm/issues/34625
+
+
+## MMLU-Pro Evaluation Script (Marky, Mar 1)
+
+> Community evaluation script used to run the quality benchmarks above.
+> Based on MMLU-Pro repo, enhanced with kimi2.5 and deepseek3.2 improvements (Marky).
+> KV cache: int16 (kv 16 per Festr). Temperature 0.1 (orangezed).
+
+```bash
+source /data1/llama.env/bin/activate
+python /data1/MMLU-Pro/evaluate_from_apiX-.py \
+  --url "[API_ENDPOINT_URL]" \
+  -m "m25nv" \
+  -n 16 \
+  -o "/data1/MMLU-Pro/eval_results_m25nv/" \
+  --retry 2 \
+  --max_tokens 48000 \
+  --retry_wrong 2
+
+# View results:
+python MMLU-Pro/evalshowpro.py -r /data1/MMLU-Pro/eval_results_m25nv/
+```
+
+**Inference params used in eval script (orangezed):**
+```python
+temperature=0.1,
+max_tokens=args.max_tokens,
+top_p=0.95,
+frequency_penalty=0,
+presence_penalty=0,
+stream=True,
+extra_body={"top_k": 40}
+```
+
+**Notes:**
+- `--retry_wrong 2`: retries each wrong answer to reduce hallucination noise.
+- Results are temperature-dependent (Lavd: "sometimes did better with abliterated version than stock" — noise at this level).
+- Festr: benchmark margins (86.2% vs 85.8%) are within probability noise. Multiple runs recommended.
+- Use `--n 16` concurrent workers for speed. Adjust based on your API throughput.
