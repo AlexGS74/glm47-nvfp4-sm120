@@ -261,3 +261,185 @@ Launch vLLM with --media-io-kwargs '{"video": {"num_frames": -1}}'. Configure fp
 | Benchmark comparison 122b vs 397b | https://qwen122-vs-397-20260224-1154.surge.sh |
 | OpenCode non-streaming PR | https://github.com/anomalyco/opencode/pull/14786 |
 | vLLM official Qwen3.5 recipe | https://docs.vllm.ai/projects/recipes/en/latest/Qwen/Qwen3.5.html |
+
+
+### Feb 26 (Continued: 8:09 AM – 1:30 PM) — Unsloth Joins; MTP=5 Confirmed at 150 tok/s
+
+**8:09 AM:** Ixtrix asks about video input on vLLM with NVFP4, shares documentation and code example (see recipes file).
+
+**~8:30 AM — Unsloth NVFP4 quants available (Shibe/UnslothAI):**
+- Shibe joins and shares: Sehyo/Qwen3.5-122B-A10B-NVFP4 (71B model, 37.3k downloads!), Sehyo/Qwen3.5-35B-A3B-NVFP4, Sehyo/Qwen3.5-397B-A17B-NVFP4
+- "Seems like 122B is most popular qwen3.5 model"
+- Festr: "have u updated the qwen with mtp layer?" — Shibe: "Not yet, still in Japan lol, until sunday"
+
+**~12:24 PM — MTP=5 confirmed at ~150 tok/s:**
+- A docker-compose config with `--speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":5}'` shows: **~150 tok/s decode at batch 1 on 4x Blackwell (vs ~75 tok/s without MTP)**
+- "updated forum" posted
+
+### Feb 27, 2026 — Tool Call PRs, Think Tags Fix, Benchmarks
+
+**1:32 PM — February 27 begins with new technical threads**
+
+**Qu gets abysmal speeds:**
+- 500-token speedtest on Qwen3.5-397B-A17B-NVFP4: 12 tok/s at 1 req / 0 context; 164 tok/s at 8 req. Something wrong with their setup.
+- Ixtrix: PCIe matters for TP. Comparison: Threadripper PRO 9975WX + 4x Max Q's on proxmox (4 NUMA nodes) shows significantly lower speeds.
+- kcramp: "iirc the pcie only matters for loading the models" — Ixtrix: "no it matters for TP"
+- Ixtrix posts MTP-3 (fixed numa nodes) vs MTP-5 benchmark tables (side-by-side screenshots)
+
+**No thinking output — critical fix (Ixtrix, ~5:17 PM):**
+- darkstar000: "has anyone encountered no thinking output with vllm?"
+- Ixtrix: must pass `extra_body["chat_template_kwargs"] = {"enable_thinking": thinking}` — otherwise vLLM does NOT enable thinking by default
+- Key note from Ixtrix: "vLLM does NOT enable thinking by default — without this flag the model always outputs `<think>...</think>` tags regardless of intent. Setting enable=True activates reasoning mode (temp 0.6, top_p 0.95). Setting enable=False activates instruct mode (temp 0.7, top_p 0.8)."
+
+**Ixtrix MTP=5 tool calling works:**
+- darkstar000: "MTP and tool calling is resolved now?"
+- chisleu: "I haven't heard that it was."
+- Ixtrix: **"mine works at mtp 5"** — a significant update; Ixtrix's specific setup (Threadripper PRO 9975WX + patched vLLM) gets tool calls working at MTP=5
+
+**Video input confirmed working:**
+- Qu: "Just want to confirm that this actually accepts video/image input?"
+- Ixtrix: "video works great"
+
+**Ixtrix shares full updated docker run command (~5:20 PM):**
+Full alias with custom patches mapped in via -v flags:
+- Maps `collective_fusion.py`, `chat_completion/serving.py`, and `qwen3coder_tool_parser.py` from PR files into the cu130-nightly container
+- Includes `--media-io-kwargs '{"video": {"num_frames": -1}}'`
+- Uses `--speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":2}'`
+- "I had to add some custom commands because GPUs don't like my VM setup"
+- Related: "Both PR files to add and map: https://github.com/vllm-project/vllm/pull/33088"
+
+**Festr creates new vLLM PR #35615 (~11:08 AM):**
+- "vibe coded better patch for the tool calling which was still failing"
+- https://github.com/vllm-project/vllm/pull/35615
+
+**Festr posts new PR #35581 (Feb 28, 4:55 AM):**
+- https://github.com/vllm-project/vllm/pull/35581
+
+**Chat template discovery (~7:21 PM):**
+- Unsloth (Daniel Han) LinkedIn post: "Qwen3.5 is now updated with improved tool-calling & coding performance after we fixed the model's chat template. Improves all variants, no matter quant type."
+- Festr: "they literally fixed chat template"
+- darkstar000: "qwen updated their chat template 4 days ago and nvidia is 11 days old, giving that one a shot"
+- Community investigating whether nvidia's NVFP4 model uses the updated chat template
+
+**AWQ quant discussion:**
+- darkstar000: "the AWQ has been more reliable and consistent for me so far lol"
+- Festr: "I think we need exact prove for this"
+- darkstar000: "the AWQ seems to capture more details when copying a screenshot of a UI for example"
+- Festr: "who did the AWQ?" — darkstar000: "QuantTrio"
+- darkstar000: "theoretically the nvfp4 should be better, its probably just lack of optimizations"
+
+**gguf discussion:**
+- Qu: "Friends don't let friends run ggufs on rtx6k"
+- Ixtrix: "If it had as good processing for parallel requests and batching I would use ggufs because they have Q4-Q8 rather than FP4 and FP8 only"
+- destroyed: "using that with these gpus is like buying a $12k stove when most dinners you make are hamburger helper or some shit"
+- Festr: "vllm / sglang is the only way here"
+- darkstar000: "yeah I won't even bother with a gguf anymore"
+
+**EleutherAI LM eval harness (~2:17 PM):**
+- Festr shares https://github.com/EleutherAI/lm-evaluation-harness
+- "if anybody has time to evaluate this framework for testing — would love to use it for evaluation qwen35 nvfp4 quant we use currently and compare to the FP8"
+- fearnworks: "eleuther lm eval harness is a very solid benchmark"
+- kcramp: "by my vibes, minimax is better than this — keeps losing context and being confidently incorrect"
+
+### Feb 28, 2026 — Today
+
+**Qu shares YouTube video:**
+- "Is Bigger Better? EVERY Qwen 3.5 Local AI Compared - 397B vs 122B v..." (xCreate channel)
+
+**MTP numa node fix confirmed:**
+- Ixtrix at 8:45 AM posts "latest run of mtp 3 (with fixed numa nodes) vs mtp 5" — side-by-side benchmark tables showing significantly improved performance with fixed NUMA node configuration
+
+**Benchmark data (MTP 3, fixed NUMA nodes):**
+
+| Scenario | Concurrency | Time | Throughput |
+|---|---|---|---|
+| Algorithm (2048 tokens) | 1 req | 17.9s | 114.4 tok/s |
+| Algorithm (2048 tokens) | 4 req | 25.9s | 316.0 tok/s |
+| Debugging (1024 tokens) | 1 req | 8.8s | 116.9 tok/s |
+| Debugging (1024 tokens) | 8 req | 16.4s | 498.2 tok/s |
+| System Design (1536 tokens) | 1 req | 14.0s | 109.7 tok/s |
+| System Design (1536 tokens) | 4 req | 20.3s | 302.2 tok/s |
+| Code Review (512 tokens) | 1 req | 4.6s | 111.5 tok/s |
+| Mixed Load (4x1024 tokens) | 4 req | 13.2s | 309.8 tok/s |
+
+**Thinking is disabled by default in vLLM (Ixtrix note):**
+kcramp: "im not using thinkign at all fyi — only nothink — i saw some benchmark that said think was worse"
+
+**Vision routing discussion (~5:17 PM):**
+- Festr: "my claude code is now connected to my GLM5 and I'm trying to solve via transparent routing if the vision can be routed to the qwen3.5 small model"
+- kcramp: "I just have it as an MCP for OCR to a different PC but still"
+- Festr: "I don't like it as MCP — it eats tokens. I'm vibing fully transparent proxy which detects image → replaces it with placeholder → if the GLM wants to see what's in the image it calls new tools which redirects the image to the vision model"
+- Ixtrix: "you could setup a proxy you connect to before GLM5 receives the request, then every request you send can filter the image data and if it's detected it routes it to the image model, then when the response is generated you inject that into the request context"
+- Festr: "next glm will have vision, impossible to not have vision in next glm release"
+
+---
+
+## Updated: Key Discoveries & Insights (as of Feb 28, 2026)
+
+### 8. Think Tags Require Explicit Flag (vLLM)
+
+vLLM does NOT enable thinking by default for Qwen3.5. Must pass:
+
+```python
+extra_body["chat_template_kwargs"] = {"enable_thinking": thinking}
+```
+
+- `enable_thinking=True`: Reasoning mode (temp 0.6, top_p 0.95)
+- `enable_thinking=False`: Instruct mode (temp 0.7, top_p 0.8)
+- Without this flag: model always outputs `<think>...</think>` tags regardless (BUG-814)
+
+### 9. NUMA Topology Critical for MTP Performance
+
+Ixtrix (Threadripper PRO 9975WX + 4x Max Q's on proxmox) was getting lower speeds than expected. Root cause: 4 NUMA nodes on the VM. Fixing NUMA node configuration dramatically improved throughput — MTP-3 with fixed NUMA shows 109–498 tok/s across scenarios.
+
+### 10. Chat Template Update (Qwen + nvidia)
+
+Both Qwen and nvidia have updated the Qwen3.5 chat template to fix tool-calling:
+- Qwen updated 4 days before Feb 27, 2026
+- nvidia updated 11 days before Feb 27, 2026
+- Unsloth: "Qwen3.5 is now updated with improved tool-calling & coding performance after we fixed the model's chat template. Improves **all variants**, no matter quant type."
+
+### 11. Ixtrix's Tool Calling Approach (MTP=5 Working)
+
+Ixtrix gets tool calling working at MTP=5 by:
+1. Mapping custom PR patch files into the container via -v flags (PR #33088 + PR #35615 files)
+2. Using the updated qwen3coder_tool_parser.py
+3. Updated config.json with correct architectures field
+Full config in recipes file under "Recipe 9 — Ixtrix's Full Video + Tool Call Docker Config".
+
+---
+
+## Updated Open Problems (as of Feb 28, 2026)
+
+1. **Tool calls with MTP=5:** Working for Ixtrix (with PR patches + patched container). Still broken for most users on stock cu130-nightly. PRs #35615 and #35581 (Festr) pending merge.
+2. **Think tags not outputting:** RESOLVED — must pass `extra_body["chat_template_kwargs"] = {"enable_thinking": True}` in vLLM
+3. **AWQ vs NVFP4 quality:** Community anecdotally prefers AWQ for some tasks (UI screenshots). NVFP4 theoretically better but unoptimized. Needs systematic benchmark (EleutherAI lm-eval suggested).
+4. **Dynamic spec token count based on server load** — not in vLLM yet
+5. **GLM 5 support** — next target; "next glm will have vision, impossible to not have vision in next glm release"
+6. **Qu's 12 tok/s mystery** — likely NUMA/PCIe topology issue on their setup
+7. **Unsloth NVFP4 with MTP layer** — Shibe building, ETA: Sunday (after Japan trip)
+8. **Video routing proxy** — Festr building transparent vision proxy for GLM5 + Qwen3.5 vision model
+
+---
+
+## Updated Resources (as of Feb 28, 2026)
+
+| Resource | Link |
+|---|---|
+| Working Recipes (full configs) | [qwen35-397b-nvfp4-recipes.md](./qwen35-397b-nvfp4-recipes.md) |
+| NVFP4 model (nvidia) | https://huggingface.co/nvidia/Qwen3.5-397B-A17B-NVFP4 |
+| Community HF model + discussion | https://huggingface.co/vincentzed-hf/Qwen3.5-397B-A17B-NVFP4/discussions/1 |
+| vLLM mlp.gate bugfix PR | https://github.com/vllm-project/vllm/pull/35156 |
+| vLLM Qwen3.5 tool call fix PR | https://github.com/vllm-project/vllm/pull/35347 |
+| Festr's tool call fix PR #35615 | https://github.com/vllm-project/vllm/pull/35615 |
+| Festr's fix PR #35581 | https://github.com/vllm-project/vllm/pull/35581 |
+| vLLM container patch PR #33088 | https://github.com/vllm-project/vllm/pull/33088 |
+| SGLang NVFP4 support PR | https://github.com/sgl-project/sglang/pull/18937 |
+| SGLang SM120 setup Gist | https://gist.github.com/catid/87cca824963f17fe7479a0ed26221397 |
+| Unsloth Qwen3.5 NVFP4 122B | https://huggingface.co/Sehyo/Qwen3.5-122B-A10B-NVFP4 |
+| Unsloth Qwen3.5 NVFP4 35B | https://huggingface.co/Sehyo/Qwen3.5-35B-A3B-NVFP4 |
+| Unsloth Qwen3.5 NVFP4 397B | https://huggingface.co/Sehyo/Qwen3.5-397B-A17B-NVFP4 |
+| EleutherAI LM Eval Harness | https://github.com/EleutherAI/lm-evaluation-harness |
+| Benchmark comparison 122b vs 397b | https://qwen122-vs-397-20260224-1154.surge.sh |
+| OpenCode non-streaming PR | https://github.com/anomalyco/opencode/pull/14786 |
+| vLLM official Qwen3.5 recipe | https://docs.vllm.ai/projects/recipes/en/latest/Qwen/Qwen3.5.html |
