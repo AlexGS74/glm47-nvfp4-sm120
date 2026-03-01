@@ -603,3 +603,59 @@ extra_body = {"chat_template_kwargs": {"enable_thinking": False}}
 - **EleutherAI lm-evaluation-harness:** https://github.com/EleutherAI/lm-evaluation-harness
 - **Sehyo NVFP4 quants (122B popular):** https://huggingface.co/Sehyo/Qwen3.5-122B-A10B-NVFP4
 - **YouTube: 397B vs 122B comparison (xCreate):** https://youtu.be/OE5KdF4spss?si=BXH8oMsRDNS6XE5N
+
+
+---
+
+## Recipe 11 — orangezed's Patched vLLM Dockerfile (Mar 1, 2026)
+
+> **Status:** Working. Applies 3 critical PRs on top of vLLM nightly cu130. Confirmed needed for Qwen 3.5 stability.
+> Context: Qwen 3.5 requires at least 2-3 cherry-picked PRs not yet merged to main. orangezed confirmed working.
+
+**Required PRs:**
+- **#35219**: FlashInfer accuracy fix — zero freed KV cache blocks
+- **#35581**: Fix Qwen3_5MTP `packed_modules_mapping` for gate_up_proj  
+- **#35615**: Fix Qwen3Coder streaming tool parser for speculative decode
+
+```dockerfile
+FROM vllm/vllm-openai:cu130-nightly
+
+# Install patch utility
+RUN apt-get update && apt-get install -y --no-install-recommends patch && rm -rf /var/lib/apt/lists/*
+
+# Apply PR #35219 (FlashInfer accuracy fix - zero freed KV cache blocks)
+COPY pr35219.patch /tmp/
+RUN cd /usr/local/lib/python3.12/dist-packages && patch -p1 < /tmp/pr35219.patch
+
+# Apply PR #35581 (Fix Qwen3_5MTP packed_modules_mapping for gate_up_proj)
+COPY pr35581.patch /tmp/
+RUN cd /usr/local/lib/python3.12/dist-packages && patch -p1 < /tmp/pr35581.patch
+
+# Apply PR #35615 (Fix Qwen3Coder streaming tool parser for speculative decode)
+COPY vllm-fix/tool_parsers/qwen3coder_tool_parser.py /usr/local/lib/python3.12/dist-packages/vllm/tool_parsers/qwen3coder_tool_parser.py
+COPY vllm-fix/chat_completion/serving.py /usr/local/lib/python3.12/dist-packages/vllm/entrypoints/openai/chat_completion/serving.py
+
+# Auto-patch config.json to add mtp.fc to quantization ignore list
+COPY patch_config.py /opt/patch_config.py
+COPY entrypoint.sh /opt/entrypoint.sh
+RUN chmod +x /opt/entrypoint.sh
+
+ENTRYPOINT ["/opt/entrypoint.sh"]
+```
+
+**Notes:**
+- Lavd confirmed: `git cherry-pick PR #35219 PR #35421` minimum; main branch may have changed.
+- PR #35421 (Lavd's reference) may be an alternate numbering for one of the above PRs.
+- orangezed's `entrypoint.sh` and `patch_config.py` auto-patch the model config.json to add mtp.fc to quantization ignore list (equivalent to the manual mtp.fc fix from Recipe 8).
+- **Context window:** max_model_len = 262,144 tokens (Qwen3.5 max).
+
+**Performance with this setup (chisleu, Mar 1, 2026):**
+
+```
+Success Rate: 3/3 (100.0%)
+Performance Metrics (~170k context):
+  TTFT: 52.37s avg (38.99s – 77.18s range) — high context TTFT expected
+  TPS:  68.4 tok/s avg (68.1 – 68.5 range) — Excellent and very stable
+```
+
+"Qwen 3.5 benchmarks profoundly faster than SGLang GLM 4.7" — chisleu
