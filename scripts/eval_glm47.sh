@@ -104,7 +104,7 @@ buster-ripper \
   --port "${PROXY_PORT}" \
   --host 127.0.0.1 \
   --eval-mode \
-  --eval-profile glm47 \
+  --eval-profile "${EVAL_PROFILE:-glm47}" \
   --eval-max-tokens "${EVAL_MAX_TOKENS}" \
   ${THINKING_FLAG} \
   >/tmp/buster-ripper-eval.log 2>&1 &

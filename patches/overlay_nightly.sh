@@ -39,6 +39,11 @@ FILES=(
   "entrypoints/anthropic/serving.py"
   "tool_parsers/glm47_moe_tool_parser.py"
   "model_executor/models/glm4_moe.py"
+  # Qwen3.5 tool call fixes (PR #35615 + #35347)
+  "tool_parsers/__init__.py"
+  "tool_parsers/qwen3coder_tool_parser.py"
+  "tool_parsers/qwen35coder_tool_parser.py"
+  "entrypoints/openai/chat_completion/serving.py"
 )
 
 for rel in "${FILES[@]}"; do
