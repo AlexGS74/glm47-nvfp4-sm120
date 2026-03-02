@@ -94,7 +94,7 @@ docker run -d \
   -e VLLM_SLEEP_WHEN_IDLE=1 \
   -e VLLM_LOG_STATS_INTERVAL=1 \
   -e TORCHINDUCTOR_CACHE_DIR=/root/.cache/torch/inductor \
-  -v "${MODEL_HOST_PATH}:/model:ro" \
+  -v "${MODEL_HOST_PATH}:/model" \
   -v "${HOME}/.cache/torch:/root/.cache/torch" \
   -v "${HOME}/.cache/vllm:/root/.cache/vllm" \
   "${IMAGE}" \
