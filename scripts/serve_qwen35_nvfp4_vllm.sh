@@ -15,8 +15,8 @@ set -euo pipefail
 # Install: uv tool install --force --pre vllm --extra-index-url https://wheels.vllm.ai/nightly
 # Download: huggingface-cli download Sehyo/Qwen3.5-397B-A17B-NVFP4
 
-HF_MODEL_ID="Sehyo/Qwen3.5-397B-A17B-NVFP4"
-LOCAL_CACHE="${HOME}/.cache/huggingface/hub/models--Sehyo--Qwen3.5-397B-A17B-NVFP4/snapshots"
+HF_MODEL_ID="nvidia/Qwen3.5-397B-A17B-NVFP4"
+LOCAL_CACHE="${HOME}/.cache/huggingface/hub/models--nvidia--Qwen3.5-397B-A17B-NVFP4/snapshots"
 
 DOWNLOAD_FIRST=${DOWNLOAD_FIRST:-1}
 
@@ -121,8 +121,8 @@ exec "${VLLM_BIN}" serve "${MODEL_PATH}" \
   --max-model-len "${MAX_MODEL_LEN}" \
   --gpu-memory-utilization "${GPU_MEM_UTIL}" \
   --enable-prefix-caching \
-  --mm-encoder-tp-mode data \
-  --mm-processor-cache-type shm \
+  --enable-expert-parallel \
+  --language-model-only \
   "${SPEC_ARGS[@]}" \
   --tool-call-parser qwen35_coder \
   --reasoning-parser qwen3 \

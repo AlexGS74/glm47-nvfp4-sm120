@@ -11,8 +11,31 @@
 set -euo pipefail
 
 VLLM_BIN=${VLLM_BIN:-${HOME}/.local/share/uv/tools/vllm/bin/vllm}
-TOKENIZER_PATH=${TOKENIZER_PATH:-$(ls -d "${HOME}/.cache/huggingface/models--QuantTrio--GLM-4.7-AWQ/snapshots/"*/ 2>/dev/null | head -1)}
-TOKENIZER_PATH=${TOKENIZER_PATH:-$(ls -d "${HOME}/.cache/huggingface/hub/models--Salyut1--GLM-4.7-NVFP4/snapshots/"*/ 2>/dev/null | head -1)}
+MODEL_FAMILY=${MODEL_FAMILY:-${1:-}}
+
+# Auto-detect tokenizer from MODEL_FAMILY
+if [[ -z "${TOKENIZER_PATH:-}" ]]; then
+  case "${MODEL_FAMILY}" in
+    qwen|qwen35)
+      TOKENIZER_PATH=$(ls -d "${HOME}/.cache/huggingface/hub/models--nvidia--Qwen3.5-397B-A17B-NVFP4/snapshots/"*/ 2>/dev/null | head -1 || true)
+      TOKENIZER_PATH=${TOKENIZER_PATH:-$(ls -d "${HOME}/.cache/huggingface/hub/models--Sehyo--Qwen3.5-397B-A17B-NVFP4/snapshots/"*/ 2>/dev/null | head -1 || true)}
+      ;;
+    glm|glm47)
+      TOKENIZER_PATH=$(ls -d "${HOME}/.cache/huggingface/hub/models--Salyut1--GLM-4.7-NVFP4/snapshots/"*/ 2>/dev/null | head -1 || true)
+      TOKENIZER_PATH=${TOKENIZER_PATH:-$(ls -d "${HOME}/.cache/huggingface/models--QuantTrio--GLM-4.7-AWQ/snapshots/"*/ 2>/dev/null | head -1 || true)}
+      TOKENIZER_PATH=${TOKENIZER_PATH:-$(ls -d "${HOME}/.cache/huggingface/hub/models--zai-org--GLM-4.7-FP8/snapshots/"*/ 2>/dev/null | head -1 || true)}
+      ;;
+    *)
+      echo "Usage: $0 <qwen|glm>" >&2
+      echo "  Or set TOKENIZER_PATH directly." >&2
+      exit 1
+      ;;
+  esac
+  if [[ -z "${TOKENIZER_PATH:-}" ]]; then
+    echo "ERROR: no cached tokenizer found for '${MODEL_FAMILY}'" >&2
+    exit 1
+  fi
+fi
 BASE_URL=${BASE_URL:-http://localhost:30000}
 MODEL=${MODEL:-claude-opus-4-5-20251001}
 INPUT_LEN=${INPUT_LEN:-512}
