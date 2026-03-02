@@ -483,3 +483,51 @@ As hype grows, RTX 6000 Pro secondary market becomes active — with associated 
 **root-754B-NVFP4.safetensors** (a member with an amusing username): "Scammers buy or steal old or abandoned eBay accounts that look legit and have some history before launching a bunch of high value items."
 
 Community advice: Use eBay's buyer protection. Never wire transfer. Verify seller feedback history.
+
+
+---
+
+## Mar 1, 2026 (Evening) — Hardware Planning, Shibe's MTP Quants, GPU Scaling
+
+### Qwen3.5 35B MTP Quants Available (22:00-23:00 UTC)
+
+Shibe (Sehyo) announced MTP-enabled NVFP4 quants are going live:
+- 22:13: Sehyo/Qwen3.5-35B-A3B-NVFP4 "35B with MTP is up"
+- 22:23: "27B done / 122B next"
+- 22:28: "27B nvfp4 is basically the same size as FP8 though" (almost all linear attn layers)
+- Community praised the work; "Super appreciate the work @Shibe"
+
+### Server Upgrade Planning Discussion (23:38-02:03 UTC)
+
+chisleu announces plans for a 4U/8-GPU server upgrade:
+- Wants SuperMicro AS-4124GS-TNR 4U server but it only has PCIe 4.0
+- Festr warns: "PCIe 4.0 - are you sure you want PCIe 4.0 only?"
+- Festr: "also you need Turin not Genoa to get the best latency on fabric link"
+- chisleu: "I watch the interconnect usage in btop and it's never over 25%"
+- Festr recommends ASUS ESC8000A-E13 (AMD EPYC 9005 dual-processor, 8 GPU slots) - "you just plug 8 cards and thats it"
+- chisleu notes PNY blower QMax cards can fit in 4U servers
+- ASUS ESC8000A-E13 price doubled from ~$10k to $20k+ since last month
+
+### PCIe Lane Discussion (23:56-02:03 UTC)
+
+Detailed PCIe lane analysis for community setups:
+- Sicario#2055: ASUS Pro WS WRX90E-SAGE SE has 6x PCIe 5.0 x16 = 96 lanes + 1x x8 = 104 total CPU lanes
+- chisleu using WRX90E-SAGE SE confirmed (blog post at convergence.ninja)
+- Festr: "cpu has 128 lanes, not all of them goes to pcie - you need for nvme / usb etc. / you can buy pcie switches though and connect 8 or even 16 cards to your rig"
+- root-754B: Asrock GENOAD24QM32 (Genoa/Turin EPYC) exposes ALL 128 PCIe lanes to user via MCIO cables at Gen5; 16 lanes stranded in OCP3 port
+- root-754B: "to me the ideal motherboard would be matx threadripper with the 8 memory channels and all lanes to MCIO 8i"
+
+### Key Hardware Notes
+
+- Cost reality: RTX PRO 6000 owners overpaid at launch (retail from Newegg etc.), early adopter tax
+- root-754B: "every time i talk to someone i feel like a peasant with only 4 6ks and 3 5090s in the rig"
+- Festr: "I started with 2x 5090 realising I need 4 realising I need 4 RTX realising I need 8 RTX"
+- AlexGS: "Getting qwen3.5 122b nvfp4 to run has been claudes biggest challenge so far"
+- chisleu: converting fantasy RPG game from Golang to web app using local vLLM as LLM backend
+
+### Coding Tools Discussion (22:37-22:43 UTC)
+
+- OpenCode vs Claude Code debate: OpenCode preferred for daily driver, Claude Code for complex tasks via local LLMs
+- "Do sometimes use Claude code though w local LLMs, for quicker less complex things opencode is fine"
+- OpenWebUI recommended as web UI
+- AlexGS: "oops, was talking to Qwenn.." (Claude Code + local LLM crossover)
