@@ -756,3 +756,86 @@ Context: ~170k tokens per query
 ```
 
 **Context window:** Qwen 3.5 max_model_len = 262,144 tokens (confirmed by chisleu and orangezed).
+
+---
+
+## Mar 1, 2026 (Evening, 15:42 UTC onwards) - Sehyo MTP Quants Launch + MTP Benchmarks
+
+### Context: CARVE Quality Tests and MTP Context Crossover (20:32-20:42 UTC)
+
+orangezed ran comprehensive tests on CARVE (Calibrated Abliteration with Refined Vector Elimination):
+- MMLU-Pro: CARVE vs Reference both score exactly 86.7% (520/600) - no quality degradation
+- 100% bypass on AdvBench 50 + HarmBench 50 (best of 3 refusals, temp=1.0)
+- CARVE MTP=2 crossover: ~20k tokens input context
+  - Below 20k: MTP=2 wins (+14 to +43%); at 20k: tied; above 20k: progressively worse (-72% at 151k)
+  - MTP acceptance rate degrades with context for abliterated weights
+- nvidia NVFP4 MTP=5 context scaling: 107 tok/s short context, stays 85+ tok/s up to 250k
+- Festr clarifies: **nvidia quant HAS MTP layers; Sehyo quant DID NOT (until today)**
+
+### Sehyo MTP NVFP4 Quants Go Live (22:13-23:07 UTC)
+
+Shibe (Sehyo) launches MTP-enabled NVFP4 quants rapidly:
+- 22:13 UTC: **Sehyo/Qwen3.5-35B-A3B-NVFP4** with MTP - "35B with MTP is up"
+- 22:23: "27B done / 122B next" - 27B NVFP4 same size as FP8 (almost all linear attn layers)
+- 22:45: **Sehyo/Qwen3.5-27B-NVFP4** uploaded
+- 23:07: **122B and 397B also now have MTP** confirmed
+
+### Festr + Shibe Debug: Tensor Shape Mismatch (23:38-23:56 UTC)
+
+Festr tries Shibe's 27B NVFP4:
+- Gets tokenizer error on old vLLM; Shibe fixes with config update
+- Model loads but MTP slow: 0 tokens accepted, tensor shape mismatch (seq_len < num_heads)
+- Festr: "anyway it looks like the nvfp4 version will be a lot slower from fp8"
+- wingrunr21 on single RTX: MTP working on latest nightly with num_speculative_tokens:1
+
+### Correct Speculative Config (23:57 UTC)
+
+- Use `--speculative-config '{"method":"qwen3_next_mtp","num_speculative_tokens":1}'` (NOT "mtp")
+- orthozany/vllm-qwen35-mtp:latest has all MTP patches, supports up to 5 spec tokens
+- Festr: MTP=3 is stable; >=4 crashes under high concurrency (no patch yet)
+
+### Shibe's MTP Performance Tables (01:12-02:14 UTC)
+
+Shibe runs systematic benchmarks on Qwen3.5-35B-A3B-NVFP4 (tp=1, single request):
+
+| Config | Avg tok/s | vs Base |
+|--------|-----------|-------|
+| No MTP | 162.3 | 1.0x |
+| MTP (1 spec token) | 152.9 | 0.94x |
+| MTP (2 spec tokens) | 166.8 | 1.03x |
+| MTP (3 spec tokens) | 197.5 | 1.22x |
+| MTP (5 spec tokens) | 189.0 | 1.16x |
+
+MTP acceptance rate (3 spec tokens): 51.7%, 2.55 tokens/step, +112% vs No MTP
+
+**500 Concurrent Load Test:**
+
+| Metric | No MTP | MTP 1 spec | MTP 3 spec |
+|--------|--------|---------|-------|
+| Engine gen throughput | ~7,000 tok/s | ~6,100 tok/s | ~5,500 tok/s |
+| Max concurrent running | 500 | 369 | 196 |
+| KV cache usage | 65.6% | 99.8% | 99.9% |
+| Completed requests (3 min) | 4,500 | 4,183 | 3,759 |
+| Latency p50 | 19.3s | 17.0s | 25.1s |
+
+**Key finding:** MTP hurts high-concurrency throughput by maxing KV cache. No MTP runs all 500 concurrent; MTP=3 caps at 196 parallel. MTP vLLM crash at high concurrency (known issue, unstable for >3).
+
+### Community Experience (01:48-02:46 UTC)
+
+- chisleu: 5,700-6,000 tok/s sustained with nvidia/Qwen3.5-397B-NVFP4 + MTP=1 spec token
+- chisleu: tested Ansible, Terraform, AWS, Golang, html/javascript, game programming, typescript - very impressed
+- AlexGS: Model overly eager, makes autonomous PR merge mistakes - "GLM 4.7 or 5 would not do a merge without asking"
+- Shibe: "Over 7000 tokens per second" peak (35B on single RTX)
+- darkstar000: skeptical - "NVFP4 feels like the fake frame generation of AI"
+- Shibe: "fake tokens" (amused)
+- orangezed: Needle-in-haystack tests work for context as high as 500k with YaRN
+- AlexGS concurrency=1: 137 Sys tok/s, TPOT 7.32ms, TTFT median 122ms, TTFT P99 22835ms
+
+### vLLM Issues
+
+- Image processing causes vLLM crashes - disable images as workaround
+- nightly vLLM: must remove CUDA ldconfig file to run
+- PR #34798 Mamba1 Kernel Level Chunk Alignment for Prefix Caching
+- PR #35675 Bug Fix Qwen3.5-nvfp4 MTP Weight Shape Mismatch (merged to main)
+- Compilation-config level 0 issue: removing it restored performance (Shibe)
+
