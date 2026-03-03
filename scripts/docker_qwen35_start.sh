@@ -18,7 +18,7 @@ SERVED_MODEL_NAME=${SERVED_MODEL_NAME:-claude-opus-4-5-20251001}
 MAX_MODEL_LEN=${MAX_MODEL_LEN:-262144}
 GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.80}
 GPU_POWER_LIMIT=${GPU_POWER_LIMIT:-270}
-SPEC_TOKENS=${SPEC_TOKENS:-5}
+SPEC_TOKENS=${SPEC_TOKENS:-0}
 KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-fp8}
 
 # Model path — try nvidia first, fall back to Sehyo (same model, different uploader).
