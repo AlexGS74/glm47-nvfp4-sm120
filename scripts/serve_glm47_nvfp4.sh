@@ -27,6 +27,14 @@ PORT=${PORT:-30000}
 TP=${TP:-4}
 DTYPE=${DTYPE:-half}
 QUANTIZATION=${QUANTIZATION:-modelopt_fp4}
+SERVED_MODEL_NAME=${SERVED_MODEL_NAME:-claude-opus-4-5-20251001}
+CONTEXT_LENGTH=${CONTEXT_LENGTH:-200000}
+MAX_RUNNING_REQUESTS=${MAX_RUNNING_REQUESTS:-48}
+MEM_FRACTION=${MEM_FRACTION:-0.95}
+CHUNKED_PREFILL_SIZE=${CHUNKED_PREFILL_SIZE:-8192}
+CUDA_GRAPH_MAX_BS=${CUDA_GRAPH_MAX_BS:-8}
+KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-fp8_e4m3}
+SCHEDULE_CONSERV=${SCHEDULE_CONSERV:-0.3}
 
 # ── Parsers ──────────────────────────────────────────────────────────────────
 # glm45 is deprecated in v0.5.6 (use glm); glm47 was added after v0.5.6.
@@ -44,6 +52,10 @@ CUDA_GRAPH=${CUDA_GRAPH:-auto}                       # auto|0|1
 
 # ── FP4 GEMM backend env var (required for flashinfer 0.5.x CUTLASS path) ───
 export SGLANG_USE_CUTLASS_BACKEND_FOR_FP4_GEMM=${SGLANG_USE_CUTLASS_BACKEND_FOR_FP4_GEMM:-1}
+
+# ── Env vars from reference recipe ─────────────────────────────────────────
+export SGL_DISABLE_TP_MEMORY_INBALANCE_CHECK=${SGL_DISABLE_TP_MEMORY_INBALANCE_CHECK:-True}
+export PYTORCH_ALLOC_CONF=${PYTORCH_ALLOC_CONF:-expandable_segments:True,max_split_size_mb:512}
 
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -132,6 +144,19 @@ exec "${SGLANG_PYTHON}" -m sglang.launch_server \
   --host "${HOST}" \
   --port "${PORT}" \
   --tp "${TP}" \
+  --served-model-name "${SERVED_MODEL_NAME}" \
+  --context-length "${CONTEXT_LENGTH}" \
+  --mem-fraction-static "${MEM_FRACTION}" \
+  --max-running-requests "${MAX_RUNNING_REQUESTS}" \
+  --chunked-prefill-size "${CHUNKED_PREFILL_SIZE}" \
+  --enable-mixed-chunk \
+  --cuda-graph-max-bs "${CUDA_GRAPH_MAX_BS}" \
+  --kv-cache-dtype "${KV_CACHE_DTYPE}" \
+  --schedule-conservativeness "${SCHEDULE_CONSERV}" \
+  --sleep-on-idle \
+  --enable-metrics \
+  --enable-cache-report \
+  --disable-shared-experts-fusion \
   --trust-remote-code \
   --tool-call-parser "${TOOL_CALL_PARSER}" \
   --reasoning-parser "${REASONING_PARSER}" \
@@ -139,3 +164,31 @@ exec "${SGLANG_PYTHON}" -m sglang.launch_server \
   --moe-runner-backend "${MOE_RUNNER_BACKEND}" \
   "${extra_flags[@]}" \
   "$@"
+
+# ── Changes applied from zai-org FP8 reference recipe (2026-03-03) ──────────
+# These were added based on the working zai-org/GLM-4.7-FP8 SGLang recipe.
+# Remove this section once validated/tuned for our NVFP4 setup.
+#
+# --served-model-name        — spoof as claude-opus-4-5-20251001 for Claude Code
+# --context-length 200000    — explicit cap (model max 202752); was unset (unlimited)
+# --mem-fraction-static 0.95 — more VRAM for KV cache; was unset (~0.88 default)
+# --max-running-requests 48  — prevents OOM under concurrent load; was unset (unlimited)
+# --chunked-prefill-size 8192— controls prefill chunk granularity; was unset
+# --enable-mixed-chunk       — allows decode to run during prefill chunks
+# --cuda-graph-max-bs 8      — explicit cudagraph batch cap; was auto
+# --kv-cache-dtype fp8_e4m3  — halves KV cache VRAM vs bf16; was unset (bf16 default)
+# --schedule-conservativeness 0.3 — more aggressive scheduling (default 1.0)
+# --sleep-on-idle            — drop GPU to P8 between requests
+# --enable-metrics           — Prometheus /metrics endpoint
+# --enable-cache-report      — prefix cache hit stats in logs
+# --disable-shared-experts-fusion — stability on MoE models; was unset
+# SGL_DISABLE_TP_MEMORY_INBALANCE_CHECK=True — skip false-positive TP memory check
+# PYTORCH_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512 — reduce CUDA fragmentation
+#
+# NOT applied (FP8-only or needs more GPUs):
+#   --dp 2                   — needs more VRAM/GPUs than we have for NVFP4
+#   --fp8-gemm-backend triton— FP8 model only
+#   USE_TRITON_W8A8_FP8_KERNEL=1 — FP8 model only
+#   --enable-hierarchical-cache --hicache-ratio 5 — needs testing, may conflict with NVFP4
+#   --enable-flashinfer-allreduce-fusion — needs testing on SM120
+#   --speculative-algorithm EAGLE — different spec method, test separately

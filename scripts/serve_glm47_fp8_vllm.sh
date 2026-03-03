@@ -26,10 +26,15 @@ SERVED_MODEL_NAME=${SERVED_MODEL_NAME:-claude-opus-4-5-20251001}
 MAX_MODEL_LEN=${MAX_MODEL_LEN:-88000}
 GPU_POWER_LIMIT=${GPU_POWER_LIMIT:-270}
 GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.95}  # GNOME display compositor holds ~500MB on GPU 0 even when not logged in
-MAX_NUM_SEQS=${MAX_NUM_SEQS:-4}
+MAX_NUM_SEQS=${MAX_NUM_SEQS:-32}
+MAX_NUM_BATCHED_TOKENS=${MAX_NUM_BATCHED_TOKENS:-8192}
 KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-fp8}
 SWAP_SPACE=${SWAP_SPACE:-16}
 SPEC_TOKENS=${SPEC_TOKENS:-0}  # MTP hurts HumanEval quality on FP8 (45% → 32%); off by default
+COMPILATION_CONFIG=${COMPILATION_CONFIG:-'{"cudagraph_mode":"PIECEWISE"}'}
+
+# ── Env vars ────────────────────────────────────────────────────────────────
+export PYTORCH_ALLOC_CONF=${PYTORCH_ALLOC_CONF:-expandable_segments:True,max_split_size_mb:512}
 
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -103,14 +108,34 @@ exec "${VLLM_BIN}" serve "${MODEL_PATH}" \
   --tensor-parallel-size "${TP}" \
   --enable-expert-parallel \
   --attention-backend "${ATTENTION_BACKEND}" \
+  --compilation-config "${COMPILATION_CONFIG}" \
   --max-model-len "${MAX_MODEL_LEN}" \
   --gpu-memory-utilization "${GPU_MEM_UTIL}" \
   --max-num-seqs "${MAX_NUM_SEQS}" \
+  --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS}" \
   --kv-cache-dtype "${KV_CACHE_DTYPE}" \
   --swap-space "${SWAP_SPACE}" \
+  --enable-prefix-caching \
   $([[ "${SPEC_TOKENS}" -gt 0 ]] && echo "--speculative-config.method mtp --speculative-config.num_speculative_tokens ${SPEC_TOKENS}") \
   --tool-call-parser glm47 \
   --reasoning-parser glm45 \
   --enable-auto-tool-choice \
   --trust-remote-code \
   "$@"
+
+# ── Changes applied from zai-org FP8 reference recipe (2026-03-03) ──────────
+# These were added based on the working zai-org/GLM-4.7-FP8 SGLang recipe,
+# translated to vLLM equivalents. Remove this section once validated.
+#
+# --max-num-seqs 32          — bumped from 4; reference uses 48 concurrent requests
+# --max-num-batched-tokens 8192 — chunked prefill control (SGLang: --chunked-prefill-size 8192)
+# --compilation-config PIECEWISE — cudagraph mode (SGLang: --cuda-graph-max-bs 8)
+# --enable-prefix-caching    — was missing; enables KV cache reuse across requests
+# PYTORCH_ALLOC_CONF         — expandable_segments + max_split_size_mb reduces CUDA fragmentation
+#
+# NOT applied (no vLLM equivalent or needs testing):
+#   --schedule-conservativeness 0.3 — SGLang-only scheduler tuning
+#   --enable-mixed-chunk      — SGLang-only (vLLM does chunked prefill differently)
+#   --disable-shared-experts-fusion — SGLang-only
+#   --enable-hierarchical-cache    — SGLang-only CPU-GPU tiered KV cache
+#   --enable-flashinfer-allreduce-fusion — SGLang-only fused comm+compute
