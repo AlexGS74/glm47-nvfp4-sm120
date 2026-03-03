@@ -98,6 +98,7 @@ docker run -d \
   -v "${MODEL_HOST_PATH}:/model" \
   -v "${HOME}/.cache/torch:/root/.cache/torch" \
   -v "${HOME}/.cache/vllm:/root/.cache/vllm" \
+  -v "${HOME}/mllm/glm47-nvfp4-sm120/patches/moe-configs/E=512,N=256,device_name=NVIDIA_RTX_PRO_6000_Blackwell_Max-Q_Workstation_Edition.json:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/fused_moe/configs/E=512,N=256,device_name=NVIDIA_RTX_PRO_6000_Blackwell_Max-Q_Workstation_Edition.json:ro" \
   "${IMAGE}" \
   --model "${MODEL_CONTAINER_PATH}" \
   --host 0.0.0.0 \
@@ -116,9 +117,9 @@ docker run -d \
   --mm-processor-cache-type shm \
   --kv-cache-dtype "${KV_CACHE_DTYPE}" \
   --enable-prefix-caching \
+  --compilation-config '{"cudagraph_mode":"PIECEWISE"}' \
   ${SPEC_ARG}
-  # If you get "CUDA error: illegal memory access", add these two lines
-  # to the docker run command above:
+  # If you get "CUDA error: illegal memory access", also try:
   #   --attention-backend FLASHINFER \
   #   --attention-config '{"use_trtllm_attention": false, "disable_flashinfer_q_quantization": true}' \
 
