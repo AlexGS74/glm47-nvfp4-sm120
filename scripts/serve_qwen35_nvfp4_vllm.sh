@@ -37,6 +37,7 @@ GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.80}   # community recipe default; GNOME on GPU 0 
 #       0 = max reliability / high concurrency (~64 tok/s)
 #     3-5 = breaks tool calls (use only for single-request code gen demos)
 SPEC_TOKENS=${SPEC_TOKENS:-2}
+KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-auto}
 
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -120,6 +121,7 @@ exec "${VLLM_BIN}" serve "${MODEL_PATH}" \
   --attention-backend "${ATTENTION_BACKEND}" \
   --max-model-len "${MAX_MODEL_LEN}" \
   --gpu-memory-utilization "${GPU_MEM_UTIL}" \
+  --kv-cache-dtype "${KV_CACHE_DTYPE}" \
   --enable-prefix-caching \
   --enable-expert-parallel \
   --language-model-only \
