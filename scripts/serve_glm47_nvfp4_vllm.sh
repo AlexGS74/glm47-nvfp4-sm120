@@ -28,6 +28,7 @@ STREAM_INTERVAL=${STREAM_INTERVAL:-1}   # keep at 1 for smooth interactive strea
 # 0.80 leaves ~19 GiB free per GPU — enough for CUDA graph capture + sampler warmup
 GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.80}
 # MTP speculative decoding — set to 0 to disable
+KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-fp8}
 SPEC_TOKENS=${SPEC_TOKENS:-0}  # MTP acceptance rate is 0% on NVFP4; disabled until fixed
 
 # ── SM120 / Blackwell fixes ───────────────────────────────────────────────────
@@ -44,11 +45,11 @@ export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4}
 export VLLM_LOGGING_LEVEL=${LOG_LEVEL:-INFO}
 # PCIe-only multi-GPU comm tuning.
 # CUDA_DEVICE_MAX_CONNECTIONS=1: serializes P2P connections, reduces contention.
-# NCCL_P2P_DISABLE=1: forces NCCL through host SHM instead of direct P2P.
-#   For decode (small ~14KB AllReduces), SHM latency can beat P2P negotiation overhead.
-#   Try both 0 and 1 to benchmark — P2P wins for large prefill, SHM may win for decode.
+# NCCL_P2P_LEVEL=4: explicit SYS-level P2P (more specific than NCCL_P2P_DISABLE=0).
+# NCCL_IB_DISABLE=1: no InfiniBand on this system — skip IB negotiation.
 export CUDA_DEVICE_MAX_CONNECTIONS=${CUDA_DEVICE_MAX_CONNECTIONS:-1}
-export NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE:-0}
+export NCCL_P2P_LEVEL=${NCCL_P2P_LEVEL:-4}
+export NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-1}
 
 # ── Adopted from FP8 reference recipe ────────────────────────────────────────
 # spawn: safer than default fork with CUDA contexts (avoids worker deadlocks)
@@ -57,6 +58,10 @@ export VLLM_WORKER_MULTIPROC_METHOD=${VLLM_WORKER_MULTIPROC_METHOD:-spawn}
 export VLLM_SLEEP_WHEN_IDLE=${VLLM_SLEEP_WHEN_IDLE:-1}
 # Ensure GPU order matches nvidia-smi (important with CUDA_VISIBLE_DEVICES)
 export CUDA_DEVICE_ORDER=${CUDA_DEVICE_ORDER:-PCI_BUS_ID}
+# Reduce CUDA memory fragmentation
+export PYTORCH_ALLOC_CONF=${PYTORCH_ALLOC_CONF:-expandable_segments:True,max_split_size_mb:512}
+# Reduce safetensors loading time — GPU-direct loading
+export SAFETENSORS_FAST_GPU=${SAFETENSORS_FAST_GPU:-1}
 # Compilation level 3 + full cuda graph — higher throughput; override with
 # COMPILATION_CONFIG='{"level":0}' to disable if startup time is an issue
 COMPILATION_CONFIG=${COMPILATION_CONFIG:-'{"level": 3, "cudagraph_mode": "full"}'}
@@ -142,6 +147,8 @@ exec "${VLLM_BIN}" serve "${MODEL_PATH}" \
   --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS}" \
   --stream-interval "${STREAM_INTERVAL}" \
   --swap-space "${SWAP_SPACE}" \
+  --kv-cache-dtype "${KV_CACHE_DTYPE}" \
+  --enable-prefix-caching \
   ${SPEC_FLAGS} \
   --chat-template "${MODEL_PATH}/chat_template.jinja" \
   --tool-call-parser glm47 \
@@ -151,3 +158,16 @@ exec "${VLLM_BIN}" serve "${MODEL_PATH}" \
   "$@"
   # To enable full request/response logging, add to the command above:
   #   --enable-log-requests --enable-log-outputs
+
+# ── Changes applied from reference recipe (2026-03-03) ─────────────────────
+# Based on the zai-org/GLM-4.7-FP8 SGLang recipe, translated to vLLM.
+# Remove this section once validated.
+#
+# --kv-cache-dtype fp8       — halves KV cache VRAM vs bf16; frees room for longer context
+# --enable-prefix-caching    — reuse KV cache across requests with shared prefixes
+# PYTORCH_ALLOC_CONF         — expandable_segments + max_split_size_mb reduces CUDA fragmentation
+#
+# ── From vincentzed-hf Qwen3.5 SM120 thread (2026-03-03) ────────────────────
+# NCCL_P2P_LEVEL=4           — explicit SYS-level P2P (replaces NCCL_P2P_DISABLE=0)
+# NCCL_IB_DISABLE=1          — skip InfiniBand negotiation (no IB on this system)
+# SAFETENSORS_FAST_GPU=1     — GPU-direct safetensors loading, faster startup

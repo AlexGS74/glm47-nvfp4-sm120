@@ -198,6 +198,39 @@ Conclusion: NVFP4 quality is noticeably worse for code generation. FP8 (self-qua
 - AlexGS humaneval: MTP on = 43%, MTP off = 45% (slight accuracy improvement with MTP off)
 - Recommendation: Disable MTP to maximize KV cache space on 4-card setups
 
+## MTP Weight Availability Across Checkpoints (March 3, 2026)
+
+GLM-4.7 uses `num_nextn_predict_layers: 1` in config.json. The MTP draft layer is
+stored as `model.layers.92.*` (layer 92, after the 92 regular layers 0-91) in a
+separate `mtp.safetensors` file. It contains a full MoE layer (160 experts + attention +
+shared_head) — same architecture as a regular transformer block.
+
+| Checkpoint | MTP weights | mtp.safetensors | Keys |
+|---|---|---|---|
+| `zai-org/GLM-4.7` (BF16) | Yes | Yes (BF16) | ~15 keys (dense MoE layer) |
+| `zai-org/GLM-4.7-FP8` | Yes | Yes (FP8 quantized) | 989 keys (with weight_scale) |
+| `Salyut1/GLM-4.7-NVFP4` | **No** | Missing | 0 keys |
+| `Tengyunw/GLM-4.7-NVFP4` | **No** | Missing | 0 keys |
+
+**Official vLLM recipe** (https://docs.vllm.ai/projects/recipes/en/latest/GLM/GLM.html)
+recommends `--speculative-config.num_speculative_tokens 1` with 90%+ acceptance rate.
+@aabbccddwasd reports ~100 tok/s on GLM-4.7 with MTP enabled (vs ~60 tok/s without).
+
+**To enable MTP on NVFP4**: graft `mtp.safetensors` from the BF16 original onto the
+NVFP4 checkpoint and update `model.safetensors.index.json`. The MTP layer stays BF16
+(same approach as ModelOpt issue NVIDIA/Model-Optimizer#750). Not yet tested.
+
+**To enable MTP on FP8** (vLLM):
+```bash
+vllm serve zai-org/GLM-4.7-FP8 \
+  --tensor-parallel-size 4 \
+  --speculative-config.method mtp \
+  --speculative-config.num_speculative_tokens 1 \
+  --tool-call-parser glm47 \
+  --reasoning-parser glm45 \
+  --enable-auto-tool-choice
+```
+
 ---
 
 ## NCCL High-Throughput Config for Turin (Dual-NUMA, Feb 27 2026)
