@@ -1,4 +1,44 @@
-# GLM-4.7 FP8 Recipes — RTX PRO 6000 (SM120)
+
+
+## Recipe 6: SM120 Triton Kernel JSON Config Fix (Mar 1, 2026)
+
+**CRITICAL for vLLM performance on RTX PRO 6000 Blackwell**
+
+### Problem
+
+vLLM shows this warning on RTX PRO 6000 Blackwell:
+
+```
+Performance might be sub-optimal! Config file not found at
+.../fused_moe/configs/E=40,N=1536,device_name=NVIDIA_RTX_PRO_6000_Blackwell_Workstation_Edition,dtype=fp8_w8a8,block_shape=[128,128].json
+```
+
+The Triton kernel config JSON files are **missing by default** for RTX PRO 6000 Blackwell cards in vLLM.
+
+### Fix
+
+Copy the Server Edition JSON to the missing path:
+
+```bash
+# Source file (Server Edition — has fp8_w8a8 configs):
+# E=128,N=704,device_name=NVIDIA_RTX_PRO_6000_Blackwell_Server_Edition,dtype=fp8_w8a8,block_shape=[128,128].json
+
+# Copy to fill the missing Workstation Edition path:
+cp /path/to/vllm/model_executor/layers/fused_moe/configs/E=128,N=704,...Server_Edition...fp8_w8a8.json \
+   /path/to/vllm/model_executor/layers/fused_moe/configs/[missing_filename].json
+```
+
+Festr: "just copy this file to any of missing json files — E=128,N=704 etc does not matter"
+chisleu confirmed: "the sm120.json file is necessary magic"
+
+### Notes
+
+- These configs accelerate serving via custom Triton kernels
+- Default configs are MISSING for RTX PRO 6000 Blackwell Workstation Edition
+- For non-fp8_w8a8 quantization (e.g., fp8_e4m3): the file content must change
+- Source JSON available at voipmonitor.org community thread
+
+**Discovered by:** root-754B (Mar 1, 2026) | **Fix by:** Festr# GLM-4.7 FP8 Recipes — RTX PRO 6000 (SM120)
 
 Community-tested configurations for running GLM-4.7 FP8 on RTX PRO 6000 (Blackwell SM120).
 Channel: #glm-47 | Server: RTX6kPRO
