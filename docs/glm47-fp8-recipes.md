@@ -217,19 +217,57 @@ recommends `--speculative-config.num_speculative_tokens 1` with 90%+ acceptance 
 @aabbccddwasd reports ~100 tok/s on GLM-4.7 with MTP enabled (vs ~60 tok/s without).
 
 **To enable MTP on NVFP4**: graft `mtp.safetensors` from the BF16 original onto the
-NVFP4 checkpoint and update `model.safetensors.index.json`. The MTP layer stays BF16
-(same approach as ModelOpt issue NVIDIA/Model-Optimizer#750). Not yet tested.
+NVFP4 checkpoint and update `model.safetensors.index.json`. The MTP layer stays BF16.
+See `scripts/graft_mtp_to_nvfp4.sh`. Also requires adding `model.layers.92` to
+`quantization_config.ignore` in config.json (the script does this automatically).
 
 **To enable MTP on FP8** (vLLM):
 ```bash
-vllm serve zai-org/GLM-4.7-FP8 \
-  --tensor-parallel-size 4 \
-  --speculative-config.method mtp \
-  --speculative-config.num_speculative_tokens 1 \
-  --tool-call-parser glm47 \
-  --reasoning-parser glm45 \
-  --enable-auto-tool-choice
+SPEC_TOKENS=1 ./scripts/serve_glm47_fp8_vllm.sh
 ```
+
+### MTP Testing Results (March 3, 2026 — AlexGS, 4x RTX PRO 6000)
+
+**Conclusion: MTP is useless on GLM-4.7 at any precision.** The official 90% acceptance
+claim is not reproducible. The draft head is fundamentally weak — acceptance rates are
+too low to overcome the overhead of running a full MoE draft layer.
+
+| Config | Acceptance rate | Single-req tok/s | Notes |
+|---|---|---|---|
+| NVFP4 + BF16 MTP graft | 1% | ~10 | Grafted BF16 mtp.safetensors onto Salyut1 NVFP4 |
+| FP8 native MTP | 12-50% | 54 | MTP weights are FP8, same precision as main model |
+| NVFP4 no MTP | n/a | 60 | Best NVFP4 performance |
+| FP8 no MTP | n/a | 56 | Slightly slower single-req than NVFP4 (larger model) |
+
+### Benchmark: NVFP4 no MTP (March 3, 2026)
+
+vLLM 0.16.1rc1, TRITON_ATTN, NCCL_P2P_LEVEL=4, 512in/256out, 32 prompts
+
+| Concurrency | Sys tok/s | TPOT median ms | TTFT median ms | TTFT P99 ms |
+|---|---|---|---|---|
+| 1 | 60 | 16.58 | 147.40 | 192.96 |
+| 2 | 90 | 22.16 | 92.68 | 139.16 |
+| 4 | 159 | 25.19 | 110.89 | 172.10 |
+| 8 | 234 | 34.21 | 131.51 | 209.57 |
+| 16 | 360 | 44.49 | 158.91 | 261.15 |
+
+### Benchmark: FP8 with MTP=1 (March 3, 2026)
+
+| Concurrency | Sys tok/s | TPOT median ms | TTFT median ms | TTFT P99 ms |
+|---|---|---|---|---|
+| 1 | 54 | 18.36 | 169.00 | 601.86 |
+
+Cancelled — slower than no-MTP due to draft overhead with low acceptance.
+
+### Benchmark: FP8 no MTP (March 3, 2026)
+
+| Concurrency | Sys tok/s | TPOT median ms | TTFT median ms | TTFT P99 ms |
+|---|---|---|---|---|
+| 1 | 56 | 17.82 | 152.54 | 470.30 |
+| 2 | 87 | 22.93 | 103.13 | 143.82 |
+| 4 | 141 | 28.27 | 127.54 | 289.96 |
+| 8 | 206 | 38.77 | 153.91 | 599.09 |
+| 16 | 316 | 50.57 | 191.65 | 664.94 |
 
 ---
 
@@ -261,6 +299,33 @@ Error encountered by chisleu (Mar 1):
 - 4x RTX PRO 6000 with FP8 model + FP8 KV cache: max context ~139k tokens
 - Fix: Reduce context length, or disable MTP to free KV cache space
 
+### FP8 KV Cache Warning (March 3, 2026 — CRITICAL)
+
+**Do NOT use `--kv-cache-dtype fp8` on SM120 with multi-session long-context workloads.**
+
+Symptom: Generation throughput drops to 6-9 tok/s (vs expected 60 tok/s) with 2+ concurrent
+sessions at 50K+ context. GPUs show 100% utilization but produce almost no tokens. Single
+sessions may appear acceptable; the problem manifests under concurrent load.
+
+Root cause: FP8 KV cache adds quantize/dequantize overhead on every attention step. With
+2 concurrent long-context sessions (50-100K tokens each), the FP8 quant/dequant per token
+doubles and becomes the bottleneck — GPUs are busy doing FP8 conversions instead of useful
+attention math.
+
+Fix: Remove `--kv-cache-dtype fp8` and let vLLM use the default (auto/bf16). This uses more
+VRAM per KV entry but eliminates the conversion overhead. Throughput recovers immediately.
+
+The tradeoff: FP8 KV cache halves KV memory (fits longer context), but the conversion overhead
+kills decode throughput under concurrent load on SM120. For Claude Code usage with multiple
+sessions, default bf16 KV cache is significantly faster.
+
+Note: prefix caching (enabled by default in vLLM V1) is NOT the cause — it was initially
+suspected but the slowdown persisted with prefix caching on. The root cause is FP8 KV dtype.
+
+Author: AlexGS (tested on 4x RTX PRO 6000, vLLM 0.16.1rc1, GLM-4.7 NVFP4)
+
+---
+
 ### Expert Parallel Warning
 
 - --enable-expert-parallel was always too slow for GLM-4.7
@@ -279,10 +344,13 @@ Error encountered by chisleu (Mar 1):
 | Code generation | FP8 mandatory | NVFP4 (code quality noticeably worse) |
 
 Key findings:
-- NVFP4 is SLOWER than FP8 on RTX PRO 6000 (SM120) - contrary to expectations
+- NVFP4 is actually FASTER than FP8 on vLLM (60 vs 56 tok/s single-req, 360 vs 316 at c=16)
+  - Smaller model = less memory bandwidth per token
+  - FP8 advantage was SGLang-specific (earlier tests); vLLM tells a different story
 - NVFP4 has noticeably worse code quality (root-754B, Mar 1)
 - INT4/AWQ runs at 60-70 tok/s vs FP8's ~100 tok/s in SGLang
 - GPTQ INT8 mixed INT4 was best quant for 4-card before FP8 (darkstar000, Feb 26)
+- MTP is useless on GLM-4.7 at any precision (1-50% acceptance) — disable it
 
 ---
 

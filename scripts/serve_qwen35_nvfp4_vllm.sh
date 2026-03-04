@@ -102,6 +102,7 @@ echo ""
 export VLLM_SLEEP_WHEN_IDLE=1
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
 # VLLM_NVFP4_GEMM_BACKEND=cutlass — causes illegal memory access with MTP on SM120
+export CUDA_DEVICE_ORDER=PCI_BUS_ID
 export NCCL_P2P_LEVEL=4
 export NCCL_IB_DISABLE=1
 export OMP_NUM_THREADS=8
@@ -122,8 +123,6 @@ exec "${VLLM_BIN}" serve "${MODEL_PATH}" \
   --max-model-len "${MAX_MODEL_LEN}" \
   --gpu-memory-utilization "${GPU_MEM_UTIL}" \
   --kv-cache-dtype "${KV_CACHE_DTYPE}" \
-  --enable-prefix-caching \
-  --enable-expert-parallel \
   --language-model-only \
   "${SPEC_ARGS[@]}" \
   --tool-call-parser qwen35_coder \

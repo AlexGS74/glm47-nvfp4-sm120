@@ -58,5 +58,16 @@ for rel in "${FILES[@]}"; do
   cp -v "${src}" "${dst}"
 done
 
+# ── MoE kernel tuning configs (RTX PRO 6000 Blackwell) ─────────────────────
+MOE_CONFIG_DIR="${VLLM_SITE}/model_executor/layers/fused_moe/configs"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+MOE_SRC_DIR="${SCRIPT_DIR}/moe-configs"
+
+echo ""
+echo "Installing MoE kernel tuning configs..."
+for cfg in "${MOE_SRC_DIR}"/*.json; do
+  cp -v "${cfg}" "${MOE_CONFIG_DIR}/"
+done
+
 echo ""
 echo "All patches applied successfully."

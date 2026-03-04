@@ -115,7 +115,6 @@ exec "${VLLM_BIN}" serve "${MODEL_PATH}" \
   --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS}" \
   --kv-cache-dtype "${KV_CACHE_DTYPE}" \
   --swap-space "${SWAP_SPACE}" \
-  --enable-prefix-caching \
   $([[ "${SPEC_TOKENS}" -gt 0 ]] && echo "--speculative-config.method mtp --speculative-config.num_speculative_tokens ${SPEC_TOKENS}") \
   --tool-call-parser glm47 \
   --reasoning-parser glm45 \
@@ -130,7 +129,7 @@ exec "${VLLM_BIN}" serve "${MODEL_PATH}" \
 # --max-num-seqs 32          — bumped from 4; reference uses 48 concurrent requests
 # --max-num-batched-tokens 8192 — chunked prefill control (SGLang: --chunked-prefill-size 8192)
 # --compilation-config PIECEWISE — cudagraph mode (SGLang: --cuda-graph-max-bs 8)
-# --enable-prefix-caching    — was missing; enables KV cache reuse across requests
+# --enable-prefix-caching    — on by default in vLLM V1; explicit flag removed (redundant)
 # PYTORCH_ALLOC_CONF         — expandable_segments + max_split_size_mb reduces CUDA fragmentation
 #
 # NOT applied (no vLLM equivalent or needs testing):

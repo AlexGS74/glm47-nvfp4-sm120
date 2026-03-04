@@ -19,7 +19,6 @@ MAX_MODEL_LEN=${MAX_MODEL_LEN:-262144}
 GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.80}
 GPU_POWER_LIMIT=${GPU_POWER_LIMIT:-270}
 SPEC_TOKENS=${SPEC_TOKENS:-0}
-KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-fp8}
 
 # Model path — try nvidia first, fall back to Sehyo (same model, different uploader).
 # HF cache uses symlinks (snapshot -> ../../blobs), so we mount the whole model dir
@@ -115,9 +114,6 @@ docker run -d \
   --reasoning-parser qwen3 \
   --mm-encoder-tp-mode data \
   --mm-processor-cache-type shm \
-  --kv-cache-dtype "${KV_CACHE_DTYPE}" \
-  --enable-prefix-caching \
-  --compilation-config '{"cudagraph_mode":"PIECEWISE"}' \
   ${SPEC_ARG}
   # If you get "CUDA error: illegal memory access", also try:
   #   --attention-backend FLASHINFER \

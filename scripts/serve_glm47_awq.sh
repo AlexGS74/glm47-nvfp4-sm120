@@ -30,6 +30,7 @@ SWAP_SPACE=${SWAP_SPACE:-8}
 MAX_NUM_BATCHED_TOKENS=${MAX_NUM_BATCHED_TOKENS:-32768}
 STREAM_INTERVAL=${STREAM_INTERVAL:-1}
 GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.80}
+KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-fp8}
 SPEC_TOKENS=${SPEC_TOKENS:-0}  # MTP slower at low concurrency; 76% acceptance rate but draft overhead dominates
 
 ATTENTION_BACKEND=${ATTENTION_BACKEND:-FLASHINFER}
@@ -51,6 +52,8 @@ export VLLM_MARLIN_USE_ATOMIC_ADD=${VLLM_MARLIN_USE_ATOMIC_ADD:-1}
 export VLLM_SLEEP_WHEN_IDLE=${VLLM_SLEEP_WHEN_IDLE:-1}
 # Ensure GPU order matches nvidia-smi (important with CUDA_VISIBLE_DEVICES)
 export CUDA_DEVICE_ORDER=${CUDA_DEVICE_ORDER:-PCI_BUS_ID}
+# Reduce CUDA memory fragmentation
+export PYTORCH_ALLOC_CONF=${PYTORCH_ALLOC_CONF:-expandable_segments:True,max_split_size_mb:512}
 # Compilation level 3 + full cuda graph — higher throughput; override with
 # COMPILATION_CONFIG='{"level":0}' to disable if startup time is an issue
 COMPILATION_CONFIG=${COMPILATION_CONFIG:-'{"level": 3, "cudagraph_mode": "full_and_piecewise"}'}
@@ -135,6 +138,8 @@ exec "${VLLM_BIN}" serve "${MODEL_PATH}" \
   --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS}" \
   --stream-interval "${STREAM_INTERVAL}" \
   --swap-space "${SWAP_SPACE}" \
+  --kv-cache-dtype "${KV_CACHE_DTYPE}" \
+  --enable-expert-parallel \
   ${SPEC_FLAGS} \
   --chat-template "${MODEL_PATH}/chat_template.jinja" \
   --tool-call-parser glm47 \
@@ -142,3 +147,11 @@ exec "${VLLM_BIN}" serve "${MODEL_PATH}" \
   --enable-auto-tool-choice \
   --trust-remote-code \
   "$@"
+
+# ── Changes applied from reference recipe (2026-03-03) ─────────────────────
+# Remove this section once validated.
+#
+# --kv-cache-dtype fp8       — halves KV cache VRAM; AWQ uses FLASHINFER so fp8 KV should work well
+# --enable-prefix-caching    — on by default in vLLM V1; explicit flag removed (redundant)
+# --enable-expert-parallel   — AWQ uses non-CUTLASS MoE path, should be safe at TP=4
+# PYTORCH_ALLOC_CONF         — expandable_segments + max_split_size_mb reduces CUDA fragmentation

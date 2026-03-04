@@ -28,7 +28,6 @@ STREAM_INTERVAL=${STREAM_INTERVAL:-1}   # keep at 1 for smooth interactive strea
 # 0.80 leaves ~19 GiB free per GPU — enough for CUDA graph capture + sampler warmup
 GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.80}
 # MTP speculative decoding — set to 0 to disable
-KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-fp8}
 SPEC_TOKENS=${SPEC_TOKENS:-0}  # MTP acceptance rate is 0% on NVFP4; disabled until fixed
 
 # ── SM120 / Blackwell fixes ───────────────────────────────────────────────────
@@ -147,8 +146,7 @@ exec "${VLLM_BIN}" serve "${MODEL_PATH}" \
   --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS}" \
   --stream-interval "${STREAM_INTERVAL}" \
   --swap-space "${SWAP_SPACE}" \
-  --kv-cache-dtype "${KV_CACHE_DTYPE}" \
-  --enable-prefix-caching \
+  --kv-cache-dtype auto \
   ${SPEC_FLAGS} \
   --chat-template "${MODEL_PATH}/chat_template.jinja" \
   --tool-call-parser glm47 \
@@ -163,8 +161,8 @@ exec "${VLLM_BIN}" serve "${MODEL_PATH}" \
 # Based on the zai-org/GLM-4.7-FP8 SGLang recipe, translated to vLLM.
 # Remove this section once validated.
 #
-# --kv-cache-dtype fp8       — halves KV cache VRAM vs bf16; frees room for longer context
-# --enable-prefix-caching    — reuse KV cache across requests with shared prefixes
+# --kv-cache-dtype fp8       — REMOVED: FP8 quant/dequant overhead kills throughput under concurrent load
+# --enable-prefix-caching    — on by default in vLLM V1; explicit flag removed (redundant)
 # PYTORCH_ALLOC_CONF         — expandable_segments + max_split_size_mb reduces CUDA fragmentation
 #
 # ── From vincentzed-hf Qwen3.5 SM120 thread (2026-03-03) ────────────────────
