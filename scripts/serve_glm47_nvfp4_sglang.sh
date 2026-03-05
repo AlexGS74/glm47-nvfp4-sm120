@@ -30,7 +30,7 @@ QUANTIZATION=${QUANTIZATION:-modelopt_fp4}
 SERVED_MODEL_NAME=${SERVED_MODEL_NAME:-claude-opus-4-5-20251001}
 MAX_RUNNING_REQUESTS=${MAX_RUNNING_REQUESTS:-32}    # reference: 64 (halved for 4 GPUs)
 MEM_FRACTION=${MEM_FRACTION:-0.90}
-CUDA_GRAPH_MAX_BS=${CUDA_GRAPH_MAX_BS:-16}           # reference: 32 (halved for 4 GPUs)
+CUDA_GRAPH_MAX_BS=${CUDA_GRAPH_MAX_BS:-16}           # 32 crashes on SM120; 16 is stable
 KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-bf16}
 
 # ── Parsers ──────────────────────────────────────────────────────────────────
@@ -178,6 +178,7 @@ exec "${SGLANG_PYTHON}" -m sglang.launch_server \
   --max-running-requests "${MAX_RUNNING_REQUESTS}" \
   --chunked-prefill-size 512 \
   --model-loader-extra-config '{"enable_multithread_load": true, "num_threads": 4}' \
+  --enable-torch-compile \
   --sleep-on-idle \
   --enable-metrics \
   "${extra_flags[@]}" \
