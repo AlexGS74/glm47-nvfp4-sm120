@@ -45,9 +45,12 @@ REASONING_PARSER=${REASONING_PARSER:-glm45}
 # flashinfer_trtllm: downloads SM100-only cubins — crashes on SM120.
 MOE_RUNNER_BACKEND=${MOE_RUNNER_BACKEND:-flashinfer_cutlass}
 ATTENTION_BACKEND=${ATTENTION_BACKEND:-flashinfer}   # trtllm attention rejects SM120
-CUDA_GRAPH=${CUDA_GRAPH:-0}                           # 0|1|auto — CUTLASS MoE crashes on SM120 with cuda graphs
+CUDA_GRAPH=${CUDA_GRAPH:-auto}                        # auto|0|1 — try with TRITON_PTXAS_PATH set
 
 # ── FP4 GEMM backend env var (required for flashinfer 0.5.x CUTLASS path) ───
+# ── Triton ptxas fix for SM120 cuda graph compilation ─────────────────────
+export TRITON_PTXAS_PATH=${TRITON_PTXAS_PATH:-/usr/local/cuda/bin/ptxas}
+
 export SGLANG_USE_CUTLASS_BACKEND_FOR_FP4_GEMM=${SGLANG_USE_CUTLASS_BACKEND_FOR_FP4_GEMM:-1}
 # Disable DeepGEMM — Salyut1 NVFP4 uses non-ue8m0 scale format, DeepGEMM causes accuracy degradation
 export SGLANG_DISABLE_DEEP_GEMM=${SGLANG_DISABLE_DEEP_GEMM:-1}
@@ -175,6 +178,8 @@ exec "${SGLANG_PYTHON}" -m sglang.launch_server \
   --max-running-requests "${MAX_RUNNING_REQUESTS}" \
   --chunked-prefill-size 512 \
   --model-loader-extra-config '{"enable_multithread_load": true, "num_threads": 4}' \
+  --sleep-on-idle \
+  --enable-metrics \
   "${extra_flags[@]}" \
   "$@"
 
