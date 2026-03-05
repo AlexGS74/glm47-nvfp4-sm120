@@ -38,7 +38,7 @@ KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-bf16}
 # glm works in v0.5.6 and main for tool-call-parser.
 # Override to glm47 when using SGLang main: TOOL_CALL_PARSER=glm47
 TOOL_CALL_PARSER=${TOOL_CALL_PARSER:-glm47}
-REASONING_PARSER=${REASONING_PARSER:-glm45}
+REASONING_PARSER=${REASONING_PARSER:-deepseek-r1}
 
 # ── Backend selection ─────────────────────────────────────────────────────────
 # flashinfer_cutlass: CUTLASS JIT path — works on SM120 with flashinfer 0.5.3.
@@ -160,6 +160,7 @@ echo ""
 
 exec "${SGLANG_PYTHON}" -m sglang.launch_server \
   --model-path "${MODEL_PATH}" \
+  --model-impl sglang \
   --tp "${TP}" \
   --trust-remote-code \
   --attention-backend "${ATTENTION_BACKEND}" \
