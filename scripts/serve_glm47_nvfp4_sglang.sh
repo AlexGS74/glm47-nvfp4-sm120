@@ -28,7 +28,7 @@ TP=${TP:-4}
 DTYPE=${DTYPE:-bfloat16}
 QUANTIZATION=${QUANTIZATION:-modelopt_fp4}
 SERVED_MODEL_NAME=${SERVED_MODEL_NAME:-claude-opus-4-5-20251001}
-MAX_RUNNING_REQUESTS=${MAX_RUNNING_REQUESTS:-32}    # reference: 64 (halved for 4 GPUs)
+MAX_RUNNING_REQUESTS=${MAX_RUNNING_REQUESTS:-16}    # capped at cuda-graph-max-bs to prevent crash
 MEM_FRACTION=${MEM_FRACTION:-0.90}
 CUDA_GRAPH_MAX_BS=${CUDA_GRAPH_MAX_BS:-16}           # 32 crashes on SM120; 16 is stable
 KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-bf16}
@@ -45,7 +45,7 @@ REASONING_PARSER=${REASONING_PARSER:-glm45}
 # flashinfer_trtllm: downloads SM100-only cubins — crashes on SM120.
 MOE_RUNNER_BACKEND=${MOE_RUNNER_BACKEND:-flashinfer_cutlass}
 ATTENTION_BACKEND=${ATTENTION_BACKEND:-flashinfer}   # trtllm attention rejects SM120
-CUDA_GRAPH=${CUDA_GRAPH:-auto}                        # auto|0|1 — try with TRITON_PTXAS_PATH set
+CUDA_GRAPH=${CUDA_GRAPH:-auto}                        # auto — crashes at bs>16 when switching to graph path; stable under c=16
 
 # ── FP4 GEMM backend env var (required for flashinfer 0.5.x CUTLASS path) ───
 # ── Triton ptxas fix for SM120 cuda graph compilation ─────────────────────
