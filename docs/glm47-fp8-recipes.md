@@ -309,6 +309,38 @@ Cancelled — slower than no-MTP due to draft overhead with low acceptance.
 | 8 | 206 | 38.77 | 153.91 | 599.09 |
 | 16 | 316 | 50.57 | 191.65 | 664.94 |
 
+### Benchmark: SGLang NVFP4 no MTP (March 4, 2026)
+
+SGLang 0.5.9, flashinfer 0.6.3, flashinfer_cutlass MoE, cuda graphs (max-bs=16),
+torch.compile, bf16 KV, chunked-prefill 512, 512in/256out, 32 prompts.
+Script: `scripts/serve_glm47_nvfp4_sglang.sh` @ commit `3fd24e3`.
+
+| Concurrency | Sys tok/s | TPOT median ms | TTFT median ms | TTFT P99 ms |
+|---|---|---|---|---|
+| 1 | 49 | 20.61 | 145.44 | 168.93 |
+| 2 | 87 | 22.90 | 94.23 | 1226.37 |
+| 4 | 147 | 27.30 | 112.25 | 149.19 |
+| 8 | 236 | 33.96 | 107.37 | 232.22 |
+| 16 | 247 | 64.76 | 177.38 | 243.50 |
+
+c=16 crashed after bench — batch exceeds cuda-graph-max-bs=16, non-graph fallback
+hits CUTLASS MoE illegal memory access on SM120. Stable up to c=8.
+
+SGLang vs vLLM comparison (NVFP4 no MTP):
+
+| Concurrency | SGLang tok/s | vLLM tok/s | Winner |
+|---|---|---|---|
+| 1 | 49 | 60 | vLLM (+22%) |
+| 2 | 87 | 90 | ~tied |
+| 4 | 147 | 159 | vLLM (+8%) |
+| 8 | 236 | 234 | ~tied |
+| 16 | 247 (crash) | 360 | vLLM (+46%) |
+
+Note: SGLang's MLA kernel advantage (100 tok/s on FP8) doesn't materialize on NVFP4.
+vLLM is faster at low concurrency and significantly faster at c=16 (no crash).
+SGLang advantages: better concurrent session behavior (68 tok/s dual-session real-world
+vs vLLM's 5-9 tok/s under FP8 KV bug), tool calling with glm47 parser.
+
 ---
 
 ## NCCL High-Throughput Config for Turin (Dual-NUMA, Feb 27 2026)
