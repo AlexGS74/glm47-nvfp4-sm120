@@ -25,22 +25,19 @@ export HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}
 HOST=${HOST:-0.0.0.0}
 PORT=${PORT:-30000}
 TP=${TP:-4}
-DTYPE=${DTYPE:-half}
+DTYPE=${DTYPE:-bfloat16}
 QUANTIZATION=${QUANTIZATION:-modelopt_fp4}
 SERVED_MODEL_NAME=${SERVED_MODEL_NAME:-claude-opus-4-5-20251001}
-CONTEXT_LENGTH=${CONTEXT_LENGTH:-200000}
-MAX_RUNNING_REQUESTS=${MAX_RUNNING_REQUESTS:-48}
-MEM_FRACTION=${MEM_FRACTION:-0.95}
-CHUNKED_PREFILL_SIZE=${CHUNKED_PREFILL_SIZE:-8192}
-CUDA_GRAPH_MAX_BS=${CUDA_GRAPH_MAX_BS:-8}
-KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-fp8_e4m3}
-SCHEDULE_CONSERV=${SCHEDULE_CONSERV:-0.3}
+MAX_RUNNING_REQUESTS=${MAX_RUNNING_REQUESTS:-32}    # reference: 64 (halved for 4 GPUs)
+MEM_FRACTION=${MEM_FRACTION:-0.90}
+CUDA_GRAPH_MAX_BS=${CUDA_GRAPH_MAX_BS:-16}           # reference: 32 (halved for 4 GPUs)
+KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-bf16}
 
 # ── Parsers ──────────────────────────────────────────────────────────────────
 # glm45 is deprecated in v0.5.6 (use glm); glm47 was added after v0.5.6.
 # glm works in v0.5.6 and main for tool-call-parser.
 # Override to glm47 when using SGLang main: TOOL_CALL_PARSER=glm47
-TOOL_CALL_PARSER=${TOOL_CALL_PARSER:-glm}
+TOOL_CALL_PARSER=${TOOL_CALL_PARSER:-glm47}
 REASONING_PARSER=${REASONING_PARSER:-glm45}
 
 # ── Backend selection ─────────────────────────────────────────────────────────
@@ -48,14 +45,31 @@ REASONING_PARSER=${REASONING_PARSER:-glm45}
 # flashinfer_trtllm: downloads SM100-only cubins — crashes on SM120.
 MOE_RUNNER_BACKEND=${MOE_RUNNER_BACKEND:-flashinfer_cutlass}
 ATTENTION_BACKEND=${ATTENTION_BACKEND:-flashinfer}   # trtllm attention rejects SM120
-CUDA_GRAPH=${CUDA_GRAPH:-auto}                       # auto|0|1
+CUDA_GRAPH=${CUDA_GRAPH:-0}                           # 0|1|auto — CUTLASS MoE crashes on SM120 with cuda graphs
 
 # ── FP4 GEMM backend env var (required for flashinfer 0.5.x CUTLASS path) ───
 export SGLANG_USE_CUTLASS_BACKEND_FOR_FP4_GEMM=${SGLANG_USE_CUTLASS_BACKEND_FOR_FP4_GEMM:-1}
+# Disable DeepGEMM — Salyut1 NVFP4 uses non-ue8m0 scale format, DeepGEMM causes accuracy degradation
+export SGLANG_DISABLE_DEEP_GEMM=${SGLANG_DISABLE_DEEP_GEMM:-1}
 
 # ── Env vars from reference recipe ─────────────────────────────────────────
-export SGL_DISABLE_TP_MEMORY_INBALANCE_CHECK=${SGL_DISABLE_TP_MEMORY_INBALANCE_CHECK:-True}
+export SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK=${SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK:-True}
 export PYTORCH_ALLOC_CONF=${PYTORCH_ALLOC_CONF:-expandable_segments:True,max_split_size_mb:512}
+
+# ── NCCL tuning from GLM-5 stable recipe ──────────────────────────────────
+export NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-1}
+export NCCL_P2P_LEVEL=${NCCL_P2P_LEVEL:-SYS}
+export NCCL_ALLOC_P2P_NET_LL_BUFFERS=${NCCL_ALLOC_P2P_NET_LL_BUFFERS:-1}
+export NCCL_MIN_NCHANNELS=${NCCL_MIN_NCHANNELS:-8}
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
+export SAFETENSORS_FAST_GPU=${SAFETENSORS_FAST_GPU:-1}
+
+# ── GPU power limit (thermal management) ─────────────────────────────────
+# RTX PRO 6000 Max-Q hits 89–91°C at full 300W during inference.
+# 270W keeps temps manageable with negligible decode performance impact.
+# Requires: sudo visudo -f /etc/sudoers.d/nvidia-power
+#   alex ALL=(ALL) NOPASSWD: /usr/bin/nvidia-smi -pl *
+GPU_POWER_LIMIT=${GPU_POWER_LIMIT:-270}
 
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -123,9 +137,14 @@ EOF
 fi
 
 extra_flags=()
-extra_flags+=("--attention-backend" "${ATTENTION_BACKEND}")
 if [[ "${resolved_disable_cuda_graph}" == "1" ]]; then
   extra_flags+=("--disable-cuda-graph")
+fi
+
+if sudo -n nvidia-smi -pl "${GPU_POWER_LIMIT}" -i 0,1,2,3 2>/dev/null; then
+  echo "GPU power limit set to ${GPU_POWER_LIMIT}W"
+else
+  echo "WARNING: could not set GPU power limit (sudo not configured?)" >&2
 fi
 
 echo "Python:      ${SGLANG_PYTHON}"
@@ -138,57 +157,38 @@ echo ""
 
 exec "${SGLANG_PYTHON}" -m sglang.launch_server \
   --model-path "${MODEL_PATH}" \
-  --model-impl sglang \
-  --quantization "${QUANTIZATION}" \
-  --dtype "${DTYPE}" \
-  --host "${HOST}" \
-  --port "${PORT}" \
   --tp "${TP}" \
-  --served-model-name "${SERVED_MODEL_NAME}" \
-  --context-length "${CONTEXT_LENGTH}" \
-  --mem-fraction-static "${MEM_FRACTION}" \
-  --max-running-requests "${MAX_RUNNING_REQUESTS}" \
-  --chunked-prefill-size "${CHUNKED_PREFILL_SIZE}" \
-  --enable-mixed-chunk \
-  --cuda-graph-max-bs "${CUDA_GRAPH_MAX_BS}" \
-  --kv-cache-dtype "${KV_CACHE_DTYPE}" \
-  --schedule-conservativeness "${SCHEDULE_CONSERV}" \
-  --sleep-on-idle \
-  --enable-metrics \
-  --enable-cache-report \
-  --disable-shared-experts-fusion \
   --trust-remote-code \
+  --attention-backend "${ATTENTION_BACKEND}" \
+  --moe-runner-backend "${MOE_RUNNER_BACKEND}" \
+  --kv-cache-dtype "${KV_CACHE_DTYPE}" \
   --tool-call-parser "${TOOL_CALL_PARSER}" \
   --reasoning-parser "${REASONING_PARSER}" \
-  --enable-custom-logit-processor \
-  --moe-runner-backend "${MOE_RUNNER_BACKEND}" \
+  --quantization "${QUANTIZATION}" \
+  --dtype "${DTYPE}" \
+  --disable-custom-all-reduce \
+  --mem-fraction-static "${MEM_FRACTION}" \
+  --cuda-graph-max-bs "${CUDA_GRAPH_MAX_BS}" \
+  --host "${HOST}" \
+  --port "${PORT}" \
+  --served-model-name "${SERVED_MODEL_NAME}" \
+  --max-running-requests "${MAX_RUNNING_REQUESTS}" \
+  --chunked-prefill-size 512 \
+  --model-loader-extra-config '{"enable_multithread_load": true, "num_threads": 4}' \
   "${extra_flags[@]}" \
   "$@"
 
-# ── Changes applied from zai-org FP8 reference recipe (2026-03-03) ──────────
-# These were added based on the working zai-org/GLM-4.7-FP8 SGLang recipe.
-# Remove this section once validated/tuned for our NVFP4 setup.
+# ── Based on GLM-5 NVFP4 stable recipe (2026-03-04) ────────────────────────
+# Synced with working GLM-5 recipe, adapted for 4 GPUs (halved batch/request limits).
 #
-# --served-model-name        — spoof as claude-opus-4-5-20251001 for Claude Code
-# --context-length 200000    — explicit cap (model max 202752); was unset (unlimited)
-# --mem-fraction-static 0.95 — more VRAM for KV cache; was unset (~0.88 default)
-# --max-running-requests 48  — prevents OOM under concurrent load; was unset (unlimited)
-# --chunked-prefill-size 8192— controls prefill chunk granularity; was unset
-# --enable-mixed-chunk       — allows decode to run during prefill chunks
-# --cuda-graph-max-bs 8      — explicit cudagraph batch cap; was auto
-# --kv-cache-dtype fp8_e4m3  — halves KV cache VRAM vs bf16; was unset (bf16 default)
-# --schedule-conservativeness 0.3 — more aggressive scheduling (default 1.0)
-# --sleep-on-idle            — drop GPU to P8 between requests
-# --enable-metrics           — Prometheus /metrics endpoint
-# --enable-cache-report      — prefix cache hit stats in logs
-# --disable-shared-experts-fusion — stability on MoE models; was unset
-# SGL_DISABLE_TP_MEMORY_INBALANCE_CHECK=True — skip false-positive TP memory check
-# PYTORCH_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512 — reduce CUDA fragmentation
+# SM120 differences from reference:
+#   --disable-cuda-graph       — CUTLASS MoE illegal memory access on SM120 with cuda graphs
+#   --dtype bfloat16           — QK-norm float32 dispatch fails with half on SM120
+#   SGLANG_DISABLE_DEEP_GEMM=1— Salyut1 NVFP4 non-ue8m0 scale format
+#   No --enable-flashinfer-allreduce-fusion — SM90/SM100 only, crashes on SM120
 #
-# NOT applied (FP8-only or needs more GPUs):
-#   --dp 2                   — needs more VRAM/GPUs than we have for NVFP4
-#   --fp8-gemm-backend triton— FP8 model only
-#   USE_TRITON_W8A8_FP8_KERNEL=1 — FP8 model only
-#   --enable-hierarchical-cache --hicache-ratio 5 — needs testing, may conflict with NVFP4
-#   --enable-flashinfer-allreduce-fusion — needs testing on SM120
-#   --speculative-algorithm EAGLE — different spec method, test separately
+# Removed (not in reference, caused instability):
+#   --model-impl sglang, --context-length, --chunked-prefill-size,
+#   --enable-mixed-chunk, --schedule-conservativeness, --sleep-on-idle,
+#   --enable-metrics, --enable-cache-report, --disable-shared-experts-fusion,
+#   --enable-custom-logit-processor
