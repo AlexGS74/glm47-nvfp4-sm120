@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 *.bak
+.DS_Store
+._.DS_Store
+docker-reverse/
