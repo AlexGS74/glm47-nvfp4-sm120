@@ -166,6 +166,7 @@ exec "${SGLANG_PYTHON}" -m sglang.launch_server \
   --attention-backend "${ATTENTION_BACKEND}" \
   --moe-runner-backend "${MOE_RUNNER_BACKEND}" \
   --kv-cache-dtype "${KV_CACHE_DTYPE}" \
+  --chat-template "${MODEL_PATH}/chat_template.jinja" \
   --tool-call-parser "${TOOL_CALL_PARSER}" \
   --reasoning-parser "${REASONING_PARSER}" \
   --quantization "${QUANTIZATION}" \
@@ -180,6 +181,7 @@ exec "${SGLANG_PYTHON}" -m sglang.launch_server \
   --chunked-prefill-size 512 \
   --model-loader-extra-config '{"enable_multithread_load": true, "num_threads": 4}' \
   --enable-torch-compile \
+  --enable-hierarchical-cache --hicache-ratio 5 \
   --sleep-on-idle \
   --enable-metrics \
   "${extra_flags[@]}" \

@@ -116,6 +116,7 @@ exec "${VLLM_BIN}" serve "${MODEL_PATH}" \
   --kv-cache-dtype "${KV_CACHE_DTYPE}" \
   --swap-space "${SWAP_SPACE}" \
   $([[ "${SPEC_TOKENS}" -gt 0 ]] && echo "--speculative-config.method mtp --speculative-config.num_speculative_tokens ${SPEC_TOKENS}") \
+  --chat-template "${MODEL_PATH}/chat_template.jinja" \
   --tool-call-parser glm47 \
   --reasoning-parser glm45 \
   --enable-auto-tool-choice \

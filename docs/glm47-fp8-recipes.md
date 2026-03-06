@@ -398,6 +398,30 @@ Author: AlexGS (tested on 4x RTX PRO 6000, vLLM 0.16.1rc1, GLM-4.7 NVFP4)
 
 ---
 
+### DCP (Decode Context Parallel) — NOT usable on GLM-4.7 with 4 GPUs
+
+**`--decode-context-parallel-size` requires TP > total_num_kv_heads.**
+
+GLM-4.7 has 8 KV heads. With TP=4, each GPU gets 2 KV heads. DCP needs to further
+split those heads, but the constraint `TP > num_kv_heads` means you need TP≥16 for
+DCP=2 on GLM-4.7. This is impossible on 4 GPUs.
+
+```
+Error: tensor parallel size 4 must be greater than total num kv heads 8
+       when enable decode context parallel for GQA/MQA
+```
+
+Community DCP usage (all on 8+ GPUs with models that have fewer KV heads per TP group):
+- Kimi K2.5: TP=8, DCP=8 → 68 tok/s, 3M KV cache (8 GPUs)
+- Qwen3.5: TP=4, DCP=2 → 80-85 tok/s (Festr, 8 GPUs) — Qwen3.5 has fewer KV heads
+- GLM-4.7: TP=4, DCP=2 → **FAILS** — 8 KV heads cannot be split across 4 GPUs with DCP
+
+Kimi K2.5 benefits from DCP but requires 8 GPUs minimum (NVFP4 won't fit on 4 GPUs).
+
+Author: AlexGS (tested March 5, 2026, vLLM 0.16.1rc1, 4x RTX PRO 6000)
+
+---
+
 ### Expert Parallel Warning
 
 - --enable-expert-parallel was always too slow for GLM-4.7

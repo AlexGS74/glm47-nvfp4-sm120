@@ -110,6 +110,7 @@ docker run -d \
   --max-num-seqs 128 \
   --served-model-name "${SERVED_MODEL_NAME}" \
   --enable-auto-tool-choice \
+  --chat-template "${MODEL_CONTAINER_PATH}/chat_template.jinja" \
   --tool-call-parser qwen3_coder \
   --reasoning-parser qwen3 \
   --mm-encoder-tp-mode data \

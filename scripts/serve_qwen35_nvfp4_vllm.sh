@@ -125,6 +125,7 @@ exec "${VLLM_BIN}" serve "${MODEL_PATH}" \
   --kv-cache-dtype "${KV_CACHE_DTYPE}" \
   --language-model-only \
   "${SPEC_ARGS[@]}" \
+  --chat-template "${MODEL_PATH}/chat_template.jinja" \
   --tool-call-parser qwen35_coder \
   --reasoning-parser qwen3 \
   --enable-auto-tool-choice \
