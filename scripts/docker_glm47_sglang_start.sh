@@ -9,6 +9,13 @@ set -euo pipefail
 #   PORT=8000 ./scripts/docker_glm47_sglang_start.sh
 
 CONTAINER_NAME=${CONTAINER_NAME:-glm47-sglang}
+
+if [[ "${1:-}" == "--stop" ]]; then
+  echo "Stopping container: ${CONTAINER_NAME}"
+  docker rm -f "${CONTAINER_NAME}" 2>/dev/null && echo "Stopped." || echo "Not running."
+  exit 0
+fi
+
 IMAGE=${IMAGE:-voipmonitor/llm-pytorch-blackwell:nightly}
 PORT=${PORT:-30000}
 TP=${TP:-4}

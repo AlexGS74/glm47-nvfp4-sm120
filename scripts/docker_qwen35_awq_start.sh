@@ -1,23 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Start Qwen3.5-397B-A17B-NVFP4 via orthozany/vllm-qwen35-mtp Docker image.
-# Based on Festr + orangezed recipe (RTX6kPRO Discord, Feb 27 2026).
-# Image includes PRs #35219, #35421, #35581. Requires mtp.fc in config ignore list.
+# Start Qwen3.5-397B-A17B-AWQ-4bit via orthozany/vllm-qwen35-mtp Docker image.
+# Model: cyankiwi/Qwen3.5-397B-A17B-AWQ-4bit (compressed-tensors, auto-detected)
+# Same patched vLLM image as the NVFP4 script for fair comparison.
 #
 # Usage:
-#   ./scripts/docker_qwen35_start.sh
-#   SPEC_TOKENS=0 ./scripts/docker_qwen35_start.sh   # disable MTP
-#   PORT=8000 ./scripts/docker_qwen35_start.sh
+#   ./scripts/docker_qwen35_awq_start.sh
+#   ./scripts/docker_qwen35_awq_start.sh --stop
+#   SPEC_TOKENS=2 ./scripts/docker_qwen35_awq_start.sh
 
-CONTAINER_NAME=${CONTAINER_NAME:-qwen35-nvfp4}
-
-if [[ "${1:-}" == "--stop" ]]; then
-  echo "Stopping container: ${CONTAINER_NAME}"
-  docker rm -f "${CONTAINER_NAME}" 2>/dev/null && echo "Stopped." || echo "Not running."
-  exit 0
-fi
-
+CONTAINER_NAME=${CONTAINER_NAME:-qwen35-awq}
 IMAGE=${IMAGE:-orthozany/vllm-qwen35-mtp:latest}
 PORT=${PORT:-30000}
 TP=${TP:-4}
@@ -27,18 +20,20 @@ GPU_MEM_UTIL=${GPU_MEM_UTIL:-0.80}
 GPU_POWER_LIMIT=${GPU_POWER_LIMIT:-270}
 SPEC_TOKENS=${SPEC_TOKENS:-0}
 
-# Model path — try nvidia first, fall back to Sehyo (same model, different uploader).
-# HF cache uses symlinks (snapshot -> ../../blobs), so we mount the whole model dir
-# and pass the snapshot sub-path to Docker. Skip incomplete downloads by resolving
-# a safetensor symlink to verify the blob actually exists.
+# ── Stop mode ────────────────────────────────────────────────────────────────
+if [[ "${1:-}" == "--stop" ]]; then
+  echo "Stopping container: ${CONTAINER_NAME}"
+  docker rm -f "${CONTAINER_NAME}" 2>/dev/null && echo "Stopped." || echo "Not running."
+  exit 0
+fi
+
+# ── Model path ────────────────────────────────────────────────────────────────
 MODEL_CACHE_DIR=""
 SNAPSHOT_REL=""
 for model_dir in \
-  "${HOME}/.cache/huggingface/hub/models--nvidia--Qwen3.5-397B-A17B-NVFP4" \
-  "${HOME}/.cache/huggingface/hub/models--Sehyo--Qwen3.5-397B-A17B-NVFP4"; do
+  "${HOME}/.cache/huggingface/hub/models--cyankiwi--Qwen3.5-397B-A17B-AWQ-4bit"; do
   snap=$(ls -d "${model_dir}/snapshots"/*/ 2>/dev/null | head -1 || true)
   [[ -z "${snap}" ]] && continue
-  # Verify model is complete: config.json blob exists + first shard blob > 1GB
   cfg=$(readlink -f "${snap}config.json" 2>/dev/null || true)
   first_shard=$(readlink -f "${snap}model-00001-of-"*.safetensors 2>/dev/null || true)
   if [[ -f "${cfg}" && -n "${first_shard}" && -f "${first_shard}" ]] \
@@ -51,8 +46,8 @@ for model_dir in \
 done
 
 if [[ -z "${MODEL_CACHE_DIR}" ]]; then
-  echo "ERROR: no complete Qwen3.5-397B-A17B-NVFP4 model found in HF cache" >&2
-  echo "  Run: huggingface-cli download nvidia/Qwen3.5-397B-A17B-NVFP4" >&2
+  echo "ERROR: Qwen3.5-397B-A17B-AWQ-4bit not found in HF cache" >&2
+  echo "  Run: hf download cyankiwi/Qwen3.5-397B-A17B-AWQ-4bit" >&2
   exit 1
 fi
 
@@ -61,18 +56,15 @@ MODEL_CONTAINER_PATH="/model/${SNAPSHOT_REL}"
 
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Stop any existing container with the same name
 if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
   echo "Stopping existing container: ${CONTAINER_NAME}"
   docker rm -f "${CONTAINER_NAME}" >/dev/null 2>&1
 fi
 
-# GPU power limit
 sudo -n nvidia-smi -pl "${GPU_POWER_LIMIT}" -i 0,1,2,3 2>/dev/null \
   && echo "GPU power limit set to ${GPU_POWER_LIMIT}W" \
   || echo "WARNING: could not set GPU power limit" >&2
 
-# Build speculative config (recipe: qwen3_next_mtp, tokens=5)
 SPEC_ARG=""
 if [[ "${SPEC_TOKENS}" -gt 0 ]]; then
   SPEC_ARG="--speculative-config {\"method\":\"qwen3_next_mtp\",\"num_speculative_tokens\":${SPEC_TOKENS}}"
@@ -83,6 +75,7 @@ echo "Model:     ${MODEL_CACHE_DIR}"
 echo "Snapshot:  ${SNAPSHOT_REL}"
 echo "Container: ${CONTAINER_NAME}"
 echo "Port:      ${PORT}"
+echo "Quant:     compressed-tensors (auto-detected)"
 echo "TP:        ${TP}  Max len: ${MAX_MODEL_LEN}  GPU util: ${GPU_MEM_UTIL}"
 echo "MTP:       SPEC_TOKENS=${SPEC_TOKENS} (method=qwen3_next_mtp)"
 echo ""
@@ -99,6 +92,7 @@ docker run -d \
   -e SAFETENSORS_FAST_GPU=1 \
   -e VLLM_WORKER_MULTIPROC_METHOD=spawn \
   -e VLLM_SLEEP_WHEN_IDLE=1 \
+  -e VLLM_MARLIN_USE_ATOMIC_ADD=1 \
   -e VLLM_LOG_STATS_INTERVAL=1 \
   -e TORCHINDUCTOR_CACHE_DIR=/root/.cache/torch/inductor \
   -v "${MODEL_HOST_PATH}:/model" \
@@ -123,13 +117,10 @@ docker run -d \
   --mm-encoder-tp-mode data \
   --mm-processor-cache-type shm \
   ${SPEC_ARG}
-  # If you get "CUDA error: illegal memory access", also try:
-  #   --attention-backend FLASHINFER \
-  #   --attention-config '{"use_trtllm_attention": false, "disable_flashinfer_q_quantization": true}' \
 
 echo ""
 echo "Container started: ${CONTAINER_NAME}"
-echo "Stop: ./scripts/docker_qwen35_stop.sh"
+echo "Stop: ./scripts/docker_qwen35_awq_start.sh --stop"
 echo ""
 sleep 1
 exec docker logs -f "${CONTAINER_NAME}"
