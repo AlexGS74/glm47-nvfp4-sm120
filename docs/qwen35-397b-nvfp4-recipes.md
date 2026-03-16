@@ -438,6 +438,47 @@ async def proxy(request: Request):
 
 ## Performance Summary (4x Blackwell / RTX Pro 6000)
 
+### Current best configs (March 15, 2026)
+
+| Setup | Tok/s c=1 | Tok/s c=8 | Tok/s c=16 | Notes |
+|---|---|---|---|---|
+| **AWQ cyankiwi, native vLLM 0.17 nightly, no MTP** | **111** | **517** | **734** | Best short-context throughput |
+| **NVFP4 lukealonso, voipmonitor cuda132, MTP=2** | **89-110** | — | — | Best long-context stability, 78-93% MTP acceptance |
+| NVFP4 lukealonso, verdictai K=64, no MTP, P2P | 79 | 412 | 649 | K=64 kernel, no real gain over stock |
+| NVFP4 lukealonso, voipmonitor cuda132, MTP=1 | 70 | — | — | MTP=1 too conservative |
+
+### voipmonitor reference benchmarks (from their GitHub, MTP=2)
+
+| Model | MTP | c=1 | c=8 | c=16 | c=128 |
+|---|---|---|---|---|---|
+| AWQ QuantTrio | ON | 147 | 767 | 1163 | 3519 |
+| lukealonso NVFP4 | ON | 127 | 615 | 934 | 3220 |
+| AWQ QuantTrio | OFF | 104 | 509 | 843 | 2796 |
+| lukealonso NVFP4 | OFF | 81 | 414 | 668 | 2291 |
+
+### AWQ vs NVFP4 long-context (c=1, tok/s)
+
+| Model | MTP | ctx=0 | 16k | 32k | 64k | 128k |
+|---|---|---|---|---|---|---|
+| **AWQ** | **ON** | **147** | 110 | 88 | 61 | **40** |
+| AWQ | OFF | 104 | 104 | 103 | 100 | 96 |
+| lukealonso NVFP4 | ON | 127 | 127 | 127 | 128 | 122 |
+| lukealonso NVFP4 | OFF | 81 | 80 | 80 | 78 | 77 |
+
+**Critical finding: AWQ + MTP collapses at long context** — 73% degradation from ctx=0 to 128k. At ctx=32k MTP becomes slower than no-MTP for AWQ. NVFP4 MTP is stable (only 4% degradation). This is Qwen3.5-specific; GLM-4.7 AWQ did NOT show this collapse.
+
+### Key learnings
+
+- **MTP=2 is the sweet spot** — model has 1 MTP layer; MTP>2 reuses same layer, destroying acceptance rate
+- **MTP acceptance depends on workload** — random bench tokens: 3-12%; real conversational text: 78-93%
+- **iommu=pt + P2P gives 40% boost** — NVFP4 went from 58→81 tok/s
+- **CPU governor=performance matters** — default powersave was leaving performance on the table
+- **voipmonitor nightly-cuda132 has MTP fix** (PR #34552/#36507) — without it, acceptance drops to 3-12%
+- **QuantTrio AWQ (KLD 0.024) is best quality** — better than lukealonso NVFP4 (0.035) and nvidia NVFP4 (0.109)
+- **Sehyo NVFP4 lacks FP8 KV scales** — defaults to bf16 KV cache (2x VRAM), use lukealonso/nvidia instead
+
+### Older results (pre-March 2026)
+
 | Setup | Tok/s (single req) | Notes |
 |---|---|---|
 | vLLM + qwen3_next_mtp, spec_tokens=5 | 200-275 | Code gen only, single req; tool calls broken |

@@ -37,7 +37,6 @@ GPU_POWER_LIMIT=${GPU_POWER_LIMIT:-270}
 # ── Env vars ──────────────────────────────────────────────────────────────────
 export VLLM_WORKER_MULTIPROC_METHOD=${VLLM_WORKER_MULTIPROC_METHOD:-spawn}
 export VLLM_MARLIN_USE_ATOMIC_ADD=${VLLM_MARLIN_USE_ATOMIC_ADD:-1}
-export VLLM_SLEEP_WHEN_IDLE=${VLLM_SLEEP_WHEN_IDLE:-1}
 export CUDA_DEVICE_ORDER=${CUDA_DEVICE_ORDER:-PCI_BUS_ID}
 export NCCL_P2P_LEVEL=${NCCL_P2P_LEVEL:-4}
 export NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-1}

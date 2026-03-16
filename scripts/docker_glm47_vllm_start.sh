@@ -98,8 +98,8 @@ docker run -d \
   -e "PYTORCH_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512" \
   -e TORCHINDUCTOR_CACHE_DIR=/root/.cache/torch/inductor \
   -v "${MODEL_CACHE_DIR}:/model" \
-  -v "${HOME}/.cache/torch:/root/.cache/torch" \
-  -v "${HOME}/.cache/vllm:/root/.cache/vllm" \
+  -v "/data/cache/torch:/root/.cache/torch" \
+  -v "/data/cache/vllm:/root/.cache/vllm" \
   "${IMAGE}" \
   python -m vllm.entrypoints.openai.api_server \
   --model "${MODEL_CONTAINER_PATH}" \

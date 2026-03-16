@@ -96,8 +96,8 @@ docker run -d \
   -e VLLM_LOG_STATS_INTERVAL=1 \
   -e TORCHINDUCTOR_CACHE_DIR=/root/.cache/torch/inductor \
   -v "${MODEL_HOST_PATH}:/model" \
-  -v "${HOME}/.cache/torch:/root/.cache/torch" \
-  -v "${HOME}/.cache/vllm:/root/.cache/vllm" \
+  -v "/data/cache/torch:/root/.cache/torch" \
+  -v "/data/cache/vllm:/root/.cache/vllm" \
   -v "${HOME}/mllm/glm47-nvfp4-sm120/patches/moe-configs/E=512,N=256,device_name=NVIDIA_RTX_PRO_6000_Blackwell_Max-Q_Workstation_Edition.json:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/fused_moe/configs/E=512,N=256,device_name=NVIDIA_RTX_PRO_6000_Blackwell_Max-Q_Workstation_Edition.json:ro" \
   "${IMAGE}" \
   --model "${MODEL_CONTAINER_PATH}" \

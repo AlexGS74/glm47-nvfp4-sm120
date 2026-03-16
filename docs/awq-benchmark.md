@@ -99,3 +99,58 @@ speculative acceptance criterion.
 - Thinking renders natively in Claude Code with `--served-model-name claude-opus-4-5-20251001`
 - AWQ faster than NVFP4 due to software maturity — vLLM SM120 NVFP4 path uses TRITON_ATTN
   and CUTLASS workarounds; AWQ uses FlashInfer + optimised Marlin kernel
+
+---
+
+## Qwen3.5 AWQ Benchmarks (March 15, 2026)
+
+**Model:** `cyankiwi/Qwen3.5-397B-A17B-AWQ-4bit` (compressed-tensors, auto-detected)
+**Engine:** native vLLM 0.17.1rc1 nightly
+**Config:** TP=4, GPU_MEM_UTIL=0.80, TRITON_ATTN, max_num_seqs=128, no MTP
+**System:** 4x RTX PRO 6000, driver 595.45.04, CUDA 13.2, iommu=pt
+
+### Qwen3.5 AWQ — No MTP
+
+| Concurrency | Sys tok/s | TPOT median ms | TTFT median ms | TTFT P99 ms |
+|-------------|-----------|----------------|----------------|-------------|
+| 1  | 111 | 9.00  | 80 ms   | 23210 ms |
+| 2  | 179 | 11.16 | 121 ms  | 648 ms   |
+| 4  | 308 | 13.00 | 253 ms  | 435 ms   |
+| 8  | 517 | 15.46 | 376 ms  | 4647 ms  |
+| 16 | 734 | 21.80 | 645 ms  | 5564 ms  |
+
+### Qwen3.5 AWQ vs NVFP4 comparison
+
+| Setup | c=1 | c=8 | c=16 | Scaling |
+|---|---|---|---|---|
+| **AWQ cyankiwi, no MTP** | **111** | **517** | **734** | 6.6x |
+| NVFP4 lukealonso, no MTP (K=64 Docker) | 79 | 412 | 649 | 8.2x |
+| NVFP4 lukealonso, MTP=2 (voipmonitor) | 89-110 | — | — | — |
+
+### AWQ long-context collapse (Qwen3.5 specific!)
+
+Per voipmonitor benchmarks, AWQ + MTP collapses catastrophically at long context:
+- ctx=0: 147 tok/s → ctx=128k: 40 tok/s (73% degradation)
+- At ctx=32k, MTP becomes slower than no-MTP for AWQ
+- NVFP4 MTP is stable: 122-128 tok/s across all context lengths (4% degradation)
+
+**This is Qwen3.5-specific.** GLM-4.7 AWQ did NOT show this collapse — NVFP4 was the one locking up on long contexts with GLM.
+
+### AWQ without MTP is stable at long context
+- Only 8% degradation from ctx=0 to 128k (104→96 tok/s)
+- All models converge at 128k/c=128 to ~1527 tok/s without MTP
+
+### Quality: QuantTrio vs cyankiwi AWQ
+
+| Checkpoint | KLD | Notes |
+|---|---|---|
+| **QuantTrio/Qwen3.5-397B-A17B-AWQ** | **0.024** | Best quality of all 4-GPU quants |
+| lukealonso NVFP4 | 0.035 | Good |
+| nvidia NVFP4 | 0.109 | Significant quality loss |
+| cyankiwi AWQ | unknown | Different quantization, untested KLD |
+
+**Recommendation:** Try QuantTrio AWQ for potentially better quality than cyankiwi.
+
+### References
+- voipmonitor benchmark data: https://github.com/voipmonitor/rtx6kpro/blob/master/benchmarks/inference-throughput/README.md
+- voipmonitor model guide: https://github.com/voipmonitor/rtx6kpro/blob/master/models/qwen35-397b.md
