@@ -24,7 +24,7 @@ IMAGE=${IMAGE:-voipmonitor/sglang:test-cu132}
 PORT=${PORT:-30000}
 TP=${TP:-4}
 SERVED_MODEL_NAME=${SERVED_MODEL_NAME:-claude-opus-4-5-20251001}
-MEM_FRACTION=${MEM_FRACTION:-0.85}
+MEM_FRACTION=${MEM_FRACTION:-0.90}
 GPU_POWER_LIMIT=${GPU_POWER_LIMIT:-270}
 # Speculative decoding: 1=on (NEXTN 5-step), 0=off
 SPEC=${SPEC:-0}
@@ -113,8 +113,8 @@ docker run -d \
   --quantization modelopt_fp4 \
   --kv-cache-dtype fp8_e4m3 \
   --trust-remote-code \
-  --cuda-graph-max-bs 64 \
-  --max-running-requests 64 \
+  --cuda-graph-max-bs 16 \
+  --max-running-requests 16 \
   --chunked-prefill-size 4096 \
   --mamba-scheduler-strategy extra_buffer \
   --mem-fraction-static "${MEM_FRACTION}" \
