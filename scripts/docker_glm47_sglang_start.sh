@@ -80,12 +80,18 @@ docker run -d \
   -e TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas \
   -e SGLANG_USE_CUTLASS_BACKEND_FOR_FP4_GEMM=1 \
   -e SGLANG_DISABLE_DEEP_GEMM=1 \
+  -e SGLANG_ENABLE_JIT_DEEPGEMM=0 \
+  -e SGLANG_ENABLE_DEEP_GEMM=0 \
+  -e SGLANG_ENABLE_SPEC_V2=True \
   -e SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK=True \
+  -e NVIDIA_TF32_OVERRIDE=1 \
+  -e FLASHINFER_DISABLE_VERSION_CHECK=1 \
   -e "PYTORCH_ALLOC_CONF=expandable_segments:True,max_split_size_mb:512" \
   -e NCCL_IB_DISABLE=1 \
   -e NCCL_P2P_LEVEL=SYS \
   -e NCCL_ALLOC_P2P_NET_LL_BUFFERS=1 \
   -e NCCL_MIN_NCHANNELS=8 \
+  -e NCCL_CUMEM_HOST_ENABLE=0 \
   -e OMP_NUM_THREADS=8 \
   -e SAFETENSORS_FAST_GPU=1 \
   -v "${MODEL_CACHE_DIR}:/model" \
@@ -101,10 +107,11 @@ docker run -d \
   --kv-cache-dtype "${KV_CACHE_DTYPE}" \
   --chat-template "${MODEL_CONTAINER_PATH}/chat_template.jinja" \
   --tool-call-parser glm47 \
-  --reasoning-parser deepseek-r1 \
+  --reasoning-parser glm45 \
   --quantization "${QUANTIZATION}" \
   --dtype "${DTYPE}" \
   --disable-custom-all-reduce \
+  --enable-flashinfer-allreduce-fusion \
   --mem-fraction-static "${MEM_FRACTION}" \
   --cuda-graph-max-bs "${CUDA_GRAPH_MAX_BS}" \
   --host 0.0.0.0 \
@@ -112,7 +119,7 @@ docker run -d \
   --served-model-name "${SERVED_MODEL_NAME}" \
   --max-running-requests "${MAX_RUNNING_REQUESTS}" \
   --chunked-prefill-size 512 \
-  --model-loader-extra-config '{"enable_multithread_load": true, "num_threads": 4}' \
+  --model-loader-extra-config '{"enable_multithread_load": true, "num_threads": 8}' \
   --enable-torch-compile \
   --enable-hierarchical-cache --hicache-ratio 5 \
   --sleep-on-idle \

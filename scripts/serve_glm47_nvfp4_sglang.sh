@@ -38,7 +38,7 @@ KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-bf16}
 # glm works in v0.5.6 and main for tool-call-parser.
 # Override to glm47 when using SGLang main: TOOL_CALL_PARSER=glm47
 TOOL_CALL_PARSER=${TOOL_CALL_PARSER:-glm47}
-REASONING_PARSER=${REASONING_PARSER:-deepseek-r1}
+REASONING_PARSER=${REASONING_PARSER:-glm45}
 
 # ── Backend selection ─────────────────────────────────────────────────────────
 # flashinfer_cutlass: CUTLASS JIT path — works on SM120 with flashinfer 0.5.3.
@@ -52,8 +52,12 @@ CUDA_GRAPH=${CUDA_GRAPH:-auto}                        # auto — crashes at bs>1
 export TRITON_PTXAS_PATH=${TRITON_PTXAS_PATH:-/usr/local/cuda/bin/ptxas}
 
 export SGLANG_USE_CUTLASS_BACKEND_FOR_FP4_GEMM=${SGLANG_USE_CUTLASS_BACKEND_FOR_FP4_GEMM:-1}
-# Disable DeepGEMM — Salyut1 NVFP4 uses non-ue8m0 scale format, DeepGEMM causes accuracy degradation
+# Disable DeepGEMM — SM120 lacks SM90/SM100 hardware features; also Salyut1 NVFP4 non-ue8m0 scales
 export SGLANG_DISABLE_DEEP_GEMM=${SGLANG_DISABLE_DEEP_GEMM:-1}
+export SGLANG_ENABLE_JIT_DEEPGEMM=${SGLANG_ENABLE_JIT_DEEPGEMM:-0}
+export SGLANG_ENABLE_DEEP_GEMM=${SGLANG_ENABLE_DEEP_GEMM:-0}
+# MTP: prevents silent NEXTN→EAGLE conversion + double model load OOM
+export SGLANG_ENABLE_SPEC_V2=${SGLANG_ENABLE_SPEC_V2:-True}
 
 # ── Env vars from reference recipe ─────────────────────────────────────────
 export SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK=${SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK:-True}
@@ -64,8 +68,11 @@ export NCCL_IB_DISABLE=${NCCL_IB_DISABLE:-1}
 export NCCL_P2P_LEVEL=${NCCL_P2P_LEVEL:-SYS}
 export NCCL_ALLOC_P2P_NET_LL_BUFFERS=${NCCL_ALLOC_P2P_NET_LL_BUFFERS:-1}
 export NCCL_MIN_NCHANNELS=${NCCL_MIN_NCHANNELS:-8}
+export NCCL_CUMEM_HOST_ENABLE=${NCCL_CUMEM_HOST_ENABLE:-0}
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
 export SAFETENSORS_FAST_GPU=${SAFETENSORS_FAST_GPU:-1}
+export NVIDIA_TF32_OVERRIDE=${NVIDIA_TF32_OVERRIDE:-1}
+export FLASHINFER_DISABLE_VERSION_CHECK=${FLASHINFER_DISABLE_VERSION_CHECK:-1}
 
 # ── GPU power limit (thermal management) ─────────────────────────────────
 # RTX PRO 6000 Max-Q hits 89–91°C at full 300W during inference.
@@ -172,6 +179,7 @@ exec "${SGLANG_PYTHON}" -m sglang.launch_server \
   --quantization "${QUANTIZATION}" \
   --dtype "${DTYPE}" \
   --disable-custom-all-reduce \
+  --enable-flashinfer-allreduce-fusion \
   --mem-fraction-static "${MEM_FRACTION}" \
   --cuda-graph-max-bs "${CUDA_GRAPH_MAX_BS}" \
   --host "${HOST}" \
@@ -179,7 +187,7 @@ exec "${SGLANG_PYTHON}" -m sglang.launch_server \
   --served-model-name "${SERVED_MODEL_NAME}" \
   --max-running-requests "${MAX_RUNNING_REQUESTS}" \
   --chunked-prefill-size 512 \
-  --model-loader-extra-config '{"enable_multithread_load": true, "num_threads": 4}' \
+  --model-loader-extra-config '{"enable_multithread_load": true, "num_threads": 8}' \
   --enable-torch-compile \
   --enable-hierarchical-cache --hicache-ratio 5 \
   --sleep-on-idle \
@@ -194,7 +202,7 @@ exec "${SGLANG_PYTHON}" -m sglang.launch_server \
 #   --disable-cuda-graph       — CUTLASS MoE illegal memory access on SM120 with cuda graphs
 #   --dtype bfloat16           — QK-norm float32 dispatch fails with half on SM120
 #   SGLANG_DISABLE_DEEP_GEMM=1— Salyut1 NVFP4 non-ue8m0 scale format
-#   No --enable-flashinfer-allreduce-fusion — SM90/SM100 only, crashes on SM120
+#   --enable-flashinfer-allreduce-fusion — now enabled (fixed in newer voipmonitor builds)
 #
 # Removed (not in reference, caused instability):
 #   --model-impl sglang, --context-length, --chunked-prefill-size,
