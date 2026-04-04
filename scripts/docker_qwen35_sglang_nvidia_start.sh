@@ -77,12 +77,13 @@ if [[ "${SPEC}" -gt 0 ]]; then
 fi
 
 _W=78
-_line() { printf '│ '; printf "%-${_W}s" "$1"; printf '│\n'; }
-_sep()  { printf '├'; printf '%0.s─' $(seq 1 $((_W+2))); printf '┤\n'; }
-_top()  { printf '┌'; printf '%0.s─' $(seq 1 $((_W+2))); printf '┐\n'; }
-_bot()  { printf '└'; printf '%0.s─' $(seq 1 $((_W+2))); printf '┘\n'; }
+_HR=$(printf '%0.s─' $(seq 1 $((_W+2))))
+_line() { printf '│ %-'"${_W}"'s│\n' "$1"; }
+_sep()  { printf '├%s┤\n' "${_HR}"; }
+_top()  { printf '┌%s┐\n' "${_HR}"; }
+_bot()  { printf '└%s┘\n' "${_HR}"; }
 _top
-_line "Qwen3.5-397B NVFP4 (nvidia) — SGLang on ${IMAGE}"
+_line "Qwen3.5-397B NVFP4 (nvidia) -- SGLang on ${IMAGE}"
 _sep
 _line "Model:       ${MODEL_CACHE_DIR}"
 _line "Snapshot:    ${SNAPSHOT_REL}"

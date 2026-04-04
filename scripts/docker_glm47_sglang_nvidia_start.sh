@@ -28,8 +28,8 @@ MEM_FRACTION=${MEM_FRACTION:-0.80}
 CUDA_GRAPH_MAX_BS=${CUDA_GRAPH_MAX_BS:-8}
 KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-bf16}
 GPU_POWER_LIMIT=${GPU_POWER_LIMIT:-270}
-MOE_RUNNER_BACKEND=${MOE_RUNNER_BACKEND:-flashinfer_cutlass}
-FP4_GEMM_BACKEND=${FP4_GEMM_BACKEND:-flashinfer_cutlass}
+MOE_RUNNER_BACKEND=${MOE_RUNNER_BACKEND:-b12x}
+FP4_GEMM_BACKEND=${FP4_GEMM_BACKEND:-b12x}
 ATTENTION_BACKEND=${ATTENTION_BACKEND:-flashinfer}
 
 # ── Model path ────────────────────────────────────────────────────────────────
@@ -71,12 +71,13 @@ sudo -n nvidia-smi -pl "${GPU_POWER_LIMIT}" -i 0,1,2,3 2>/dev/null \
   || echo "WARNING: could not set GPU power limit" >&2
 
 _W=78  # inner width between │ chars
-_line() { printf '│ '; printf "%-${_W}s" "$1"; printf '│\n'; }
-_sep()  { printf '├'; printf '%0.s─' $(seq 1 $((_W+2))); printf '┤\n'; }
-_top()  { printf '┌'; printf '%0.s─' $(seq 1 $((_W+2))); printf '┐\n'; }
-_bot()  { printf '└'; printf '%0.s─' $(seq 1 $((_W+2))); printf '┘\n'; }
+_HR=$(printf '%0.s─' $(seq 1 $((_W+2))))  # _W+1 dashes: space + content
+_line() { printf '│ %-'"${_W}"'s│\n' "$1"; }
+_sep()  { printf '├%s┤\n' "${_HR}"; }
+_top()  { printf '┌%s┐\n' "${_HR}"; }
+_bot()  { printf '└%s┘\n' "${_HR}"; }
 _top
-_line "GLM-4.7 NVFP4 (nvidia) — SGLang on ${IMAGE}"
+_line "GLM-4.7 NVFP4 (nvidia) -- SGLang on ${IMAGE}"
 _sep
 _line "Model:       ${MODEL_CACHE_DIR}"
 _line "Snapshot:    ${SNAPSHOT_REL}"
@@ -101,6 +102,10 @@ docker run -d \
   --ulimit memlock=-1 \
   --ulimit stack=67108864 \
   --network host \
+  -e CUDA_HOME=/usr/local/cuda \
+  -e TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas \
+  -e TORCH_COMPILE_DISABLE=1 \
+  -e TORCHDYNAMO_DISABLE=1 \
   -e SGLANG_ENABLE_SPEC_V2=True \
   -e SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK=True \
   -e SGLANG_ENABLE_JIT_DEEPGEMM=0 \
