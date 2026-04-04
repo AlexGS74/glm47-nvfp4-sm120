@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Start Qwen3.5-397B-A17B-NVFP4 (nvidia quant) via voipmonitor/sglang:test-cu132.
-# Custom SM120 MoE and FP4 kernels (b12x backend) written from scratch.
+# Start GLM-4.7 NVFP4 (nvidia quant) via SGLang on voipmonitor/sglang:cu130.
+# b12x backends for single-user decode; override MOE_RUNNER_BACKEND=cutlass for 4+ concurrent.
 #
 # Usage:
-#   ./scripts/docker_qwen35_sglang_nvidia_start.sh
-#   ./scripts/docker_qwen35_sglang_nvidia_start.sh --stop
-#   SPEC=0 ./scripts/docker_qwen35_sglang_nvidia_start.sh
-#   PORT=8000 ./scripts/docker_qwen35_sglang_nvidia_start.sh
+#   ./scripts/docker_glm47_sglang_nvidia_start.sh
+#   ./scripts/docker_glm47_sglang_nvidia_start.sh --stop
+#   PORT=8000 ./scripts/docker_glm47_sglang_nvidia_start.sh
 
-CONTAINER_NAME=${CONTAINER_NAME:-qwen35-sglang-nvidia}
+CONTAINER_NAME=${CONTAINER_NAME:-glm47-sglang-nvidia}
 
 if [[ "${1:-}" == "--stop" ]]; then
   echo "Stopping container: ${CONTAINER_NAME}"
@@ -21,18 +20,24 @@ fi
 IMAGE=${IMAGE:-voipmonitor/sglang:cu130}
 PORT=${PORT:-30000}
 TP=${TP:-4}
+DTYPE=${DTYPE:-bfloat16}
+QUANTIZATION=${QUANTIZATION:-modelopt_fp4}
 SERVED_MODEL_NAME=${SERVED_MODEL_NAME:-claude-opus-4-5-20251001}
+MAX_RUNNING_REQUESTS=${MAX_RUNNING_REQUESTS:-16}
 MEM_FRACTION=${MEM_FRACTION:-0.80}
+CUDA_GRAPH_MAX_BS=${CUDA_GRAPH_MAX_BS:-8}
+KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-bf16}
 GPU_POWER_LIMIT=${GPU_POWER_LIMIT:-270}
-# Speculative decoding: 1=on (NEXTN 5-step), 0=off
-SPEC=${SPEC:-0}
+MOE_RUNNER_BACKEND=${MOE_RUNNER_BACKEND:-flashinfer_cutlass}
+FP4_GEMM_BACKEND=${FP4_GEMM_BACKEND:-flashinfer_cutlass}
+ATTENTION_BACKEND=${ATTENTION_BACKEND:-flashinfer}
 
 # ── Model path ────────────────────────────────────────────────────────────────
 MODEL_CACHE_DIR=""
 SNAPSHOT_REL=""
 for model_dir in \
-  "/data/huggingface/hub/models--nvidia--Qwen3.5-397B-A17B-NVFP4" \
-  "${HOME}/.cache/huggingface/hub/models--nvidia--Qwen3.5-397B-A17B-NVFP4"; do
+  "/data/huggingface/hub/models--nvidia--GLM-4.7-NVFP4" \
+  "${HOME}/.cache/huggingface/hub/models--nvidia--GLM-4.7-NVFP4"; do
   snap=$(ls -d "${model_dir}/snapshots"/*/ 2>/dev/null | head -1 || true)
   [[ -z "${snap}" ]] && continue
   cfg=$(readlink -f "${snap}config.json" 2>/dev/null || true)
@@ -47,18 +52,12 @@ for model_dir in \
 done
 
 if [[ -z "${MODEL_CACHE_DIR}" ]]; then
-  echo "ERROR: Qwen3.5-397B-A17B-NVFP4 not found in HF cache" >&2
-  echo "  Run: HF_HOME=/data/huggingface hf download nvidia/Qwen3.5-397B-A17B-NVFP4" >&2
+  echo "ERROR: nvidia/GLM-4.7-NVFP4 not found in HF cache" >&2
+  echo "  Run: HF_HOME=/data/huggingface hf download nvidia/GLM-4.7-NVFP4" >&2
   exit 1
 fi
 
-MODEL_HOST_PATH="${MODEL_CACHE_DIR}"
 MODEL_CONTAINER_PATH="/model/${SNAPSHOT_REL}"
-
-# ── Pre-flight checks ────────────────────────────────────────────────────────
-if ! grep -q 'iommu=pt' /proc/cmdline 2>/dev/null; then
-  echo "WARNING: iommu=pt not in kernel params. Recommended for Threadripper P2P."
-fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -71,29 +70,25 @@ sudo -n nvidia-smi -pl "${GPU_POWER_LIMIT}" -i 0,1,2,3 2>/dev/null \
   && echo "GPU power limit set to ${GPU_POWER_LIMIT}W" \
   || echo "WARNING: could not set GPU power limit" >&2
 
-SPEC_ARGS=""
-if [[ "${SPEC}" -gt 0 ]]; then
-  SPEC_ARGS="--speculative-algo NEXTN --speculative-num-steps 5 --speculative-eagle-topk 1 --speculative-num-draft-tokens 6"
-fi
-
-_W=78
+_W=78  # inner width between │ chars
 _line() { printf '│ '; printf "%-${_W}s" "$1"; printf '│\n'; }
 _sep()  { printf '├'; printf '%0.s─' $(seq 1 $((_W+2))); printf '┤\n'; }
 _top()  { printf '┌'; printf '%0.s─' $(seq 1 $((_W+2))); printf '┐\n'; }
 _bot()  { printf '└'; printf '%0.s─' $(seq 1 $((_W+2))); printf '┘\n'; }
 _top
-_line "Qwen3.5-397B NVFP4 (nvidia) — SGLang on ${IMAGE}"
+_line "GLM-4.7 NVFP4 (nvidia) — SGLang on ${IMAGE}"
 _sep
 _line "Model:       ${MODEL_CACHE_DIR}"
 _line "Snapshot:    ${SNAPSHOT_REL}"
 _line "Container:   ${CONTAINER_NAME}    Port: ${PORT}"
-_line "TP: ${TP}   Mem: ${MEM_FRACTION}   Max running: 16   CUDA graphs: max_bs=64"
-_line "KV cache:    fp8_e4m3   Quant: modelopt_fp4"
-_line "Backends:    MoE=b12x  FP4=b12x  Attn=flashinfer"
-_line "Chunked prefill: 4096   Spec: SPEC=${SPEC} (1=NEXTN, 0=off)"
-_line "NCCL:        P2P=SYS  IB=off  SAFETENSORS_FAST=1  OMP_THREADS=8"
+_line "TP: ${TP}   Mem: ${MEM_FRACTION}   Max running: ${MAX_RUNNING_REQUESTS}   CUDA graphs: max_bs=${CUDA_GRAPH_MAX_BS}"
+_line "KV cache:    ${KV_CACHE_DTYPE}   Quant: ${QUANTIZATION}"
+_line "Backends:    MoE=${MOE_RUNNER_BACKEND}  FP4=${FP4_GEMM_BACKEND}  Attn=${ATTENTION_BACKEND}"
+_line "Chunked prefill: 4096"
+_line "NCCL:        P2P=SYS  IB=off  LL_BUFFERS=1  MIN_CH=8"
+_line "Env:         TF32=1  OMP_THREADS=8  SAFETENSORS_FAST=1"
 _line "Flags:       --disable-custom-all-reduce --enable-metrics"
-_line "             --reasoning-parser qwen3 --tool-call-parser qwen3_coder"
+_line "             --reasoning-parser glm45 --tool-call-parser glm47"
 _line "             --schedule-conservativeness 0.1"
 _bot
 echo ""
@@ -107,41 +102,47 @@ docker run -d \
   --ulimit stack=67108864 \
   --network host \
   -e SGLANG_ENABLE_SPEC_V2=True \
+  -e SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK=True \
+  -e SGLANG_ENABLE_JIT_DEEPGEMM=0 \
+  -e SGLANG_ENABLE_DEEP_GEMM=0 \
+  -e NVIDIA_TF32_OVERRIDE=1 \
+  -e FLASHINFER_DISABLE_VERSION_CHECK=1 \
   -e NCCL_P2P_DISABLE=0 \
   -e NCCL_P2P_LEVEL=SYS \
   -e NCCL_IB_DISABLE=1 \
+  -e NCCL_ALLOC_P2P_NET_LL_BUFFERS=1 \
+  -e NCCL_MIN_NCHANNELS=8 \
+  -e NCCL_CUMEM_HOST_ENABLE=0 \
   -e SAFETENSORS_FAST_GPU=1 \
   -e OMP_NUM_THREADS=8 \
   -e PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True \
-  -v "${MODEL_HOST_PATH}:/model:ro" \
+  -v "${MODEL_CACHE_DIR}:/model:ro" \
   -v "/data/cache/sglang:/cache/jit" \
   "${IMAGE}" \
   python3 -m sglang.launch_server \
   --model "${MODEL_CONTAINER_PATH}" \
   --served-model-name "${SERVED_MODEL_NAME}" \
-  --reasoning-parser qwen3 \
-  --tool-call-parser qwen3_coder \
+  --reasoning-parser glm45 \
+  --tool-call-parser glm47 \
   --tensor-parallel-size "${TP}" \
-  --quantization modelopt_fp4 \
-  --kv-cache-dtype fp8_e4m3 \
+  --quantization "${QUANTIZATION}" \
+  --kv-cache-dtype "${KV_CACHE_DTYPE}" \
   --trust-remote-code \
-  --cuda-graph-max-bs 64 \
-  --max-running-requests 16 \
+  --cuda-graph-max-bs "${CUDA_GRAPH_MAX_BS}" \
+  --max-running-requests "${MAX_RUNNING_REQUESTS}" \
   --chunked-prefill-size 4096 \
-  --mamba-scheduler-strategy extra_buffer \
   --mem-fraction-static "${MEM_FRACTION}" \
   --host 0.0.0.0 --port "${PORT}" \
   --disable-custom-all-reduce \
   --enable-metrics \
   --schedule-conservativeness 0.1 \
-  --attention-backend flashinfer \
-  --fp4-gemm-backend b12x \
-  --moe-runner-backend b12x \
-  ${SPEC_ARGS}
+  --attention-backend "${ATTENTION_BACKEND}" \
+  --fp4-gemm-backend "${FP4_GEMM_BACKEND}" \
+  --moe-runner-backend "${MOE_RUNNER_BACKEND}"
 
 echo ""
 echo "Container started: ${CONTAINER_NAME}"
-echo "Stop: ./scripts/docker_qwen35_sglang_nvidia_start.sh --stop"
+echo "Stop: ./scripts/docker_glm47_sglang_nvidia_start.sh --stop"
 echo ""
 sleep 1
 exec docker logs -f "${CONTAINER_NAME}"
