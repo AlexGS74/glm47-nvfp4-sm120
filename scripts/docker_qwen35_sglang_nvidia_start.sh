@@ -77,7 +77,7 @@ if [[ "${SPEC}" -gt 0 ]]; then
 fi
 
 _W=78
-_HR=$(printf '%0.s─' $(seq 1 $((_W+2))))
+_HR=$(printf '%0.s─' $(seq 1 $((_W+1))))
 _line() { printf '│ %-'"${_W}"'s│\n' "$1"; }
 _sep()  { printf '├%s┤\n' "${_HR}"; }
 _top()  { printf '┌%s┐\n' "${_HR}"; }

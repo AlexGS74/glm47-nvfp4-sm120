@@ -28,6 +28,8 @@ MEM_FRACTION=${MEM_FRACTION:-0.80}
 CUDA_GRAPH_MAX_BS=${CUDA_GRAPH_MAX_BS:-8}
 KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-bf16}
 GPU_POWER_LIMIT=${GPU_POWER_LIMIT:-270}
+# Speculative decoding: 1=on (NEXTN 4-step), 0=off
+SPEC=${SPEC:-1}
 MOE_RUNNER_BACKEND=${MOE_RUNNER_BACKEND:-b12x}
 FP4_GEMM_BACKEND=${FP4_GEMM_BACKEND:-b12x}
 ATTENTION_BACKEND=${ATTENTION_BACKEND:-flashinfer}
@@ -70,8 +72,13 @@ sudo -n nvidia-smi -pl "${GPU_POWER_LIMIT}" -i 0,1,2,3 2>/dev/null \
   && echo "GPU power limit set to ${GPU_POWER_LIMIT}W" \
   || echo "WARNING: could not set GPU power limit" >&2
 
+SPEC_ARGS=""
+if [[ "${SPEC}" -gt 0 ]]; then
+  SPEC_ARGS="--speculative-algo NEXTN --speculative-num-steps 4 --speculative-eagle-topk 1 --speculative-num-draft-tokens 6"
+fi
+
 _W=78  # inner width between │ chars
-_HR=$(printf '%0.s─' $(seq 1 $((_W+2))))  # _W+1 dashes: space + content
+_HR=$(printf '%0.s─' $(seq 1 $((_W+1))))  # _W+1 dashes: space + content
 _line() { printf '│ %-'"${_W}"'s│\n' "$1"; }
 _sep()  { printf '├%s┤\n' "${_HR}"; }
 _top()  { printf '┌%s┐\n' "${_HR}"; }
@@ -85,7 +92,7 @@ _line "Container:   ${CONTAINER_NAME}    Port: ${PORT}"
 _line "TP: ${TP}   Mem: ${MEM_FRACTION}   Max running: ${MAX_RUNNING_REQUESTS}   CUDA graphs: max_bs=${CUDA_GRAPH_MAX_BS}"
 _line "KV cache:    ${KV_CACHE_DTYPE}   Quant: ${QUANTIZATION}"
 _line "Backends:    MoE=${MOE_RUNNER_BACKEND}  FP4=${FP4_GEMM_BACKEND}  Attn=${ATTENTION_BACKEND}"
-_line "Chunked prefill: 4096"
+_line "Chunked prefill: 4096   Spec: SPEC=${SPEC} (1=NEXTN 4-step, 0=off)"
 _line "NCCL:        P2P=SYS  IB=off  LL_BUFFERS=1  MIN_CH=8"
 _line "Env:         TF32=1  OMP_THREADS=8  SAFETENSORS_FAST=1"
 _line "Flags:       --disable-custom-all-reduce --enable-metrics"
@@ -143,7 +150,8 @@ docker run -d \
   --schedule-conservativeness 0.1 \
   --attention-backend "${ATTENTION_BACKEND}" \
   --fp4-gemm-backend "${FP4_GEMM_BACKEND}" \
-  --moe-runner-backend "${MOE_RUNNER_BACKEND}"
+  --moe-runner-backend "${MOE_RUNNER_BACKEND}" \
+  ${SPEC_ARGS}
 
 echo ""
 echo "Container started: ${CONTAINER_NAME}"
