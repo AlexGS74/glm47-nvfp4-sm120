@@ -32,7 +32,8 @@ EVAL_THINKING=${EVAL_THINKING:-0}   # 0 = disable (faster, ~44%); 1 = enable thi
 REPETITION_PENALTY=${REPETITION_PENALTY:-1.05}
 
 # ── Tokenizer (for lm-eval token counting) ────────────────────────────────────
-NVFP4_TOKENIZER=$(ls -d "${HOME}/.cache/huggingface/hub/models--Salyut1--GLM-4.7-NVFP4/snapshots/"*/ 2>/dev/null | head -1 || true)
+NVFP4_TOKENIZER=$(ls -d /data/huggingface/hub/models--nvidia--GLM-4.7-NVFP4/snapshots/*/ 2>/dev/null | head -1 || true)
+NVFP4_TOKENIZER=${NVFP4_TOKENIZER:-$(ls -d "${HOME}/.cache/huggingface/hub/models--Salyut1--GLM-4.7-NVFP4/snapshots/"*/ 2>/dev/null | head -1 || true)}
 AWQ_TOKENIZER=$(ls -d "${HOME}/.cache/huggingface/models--QuantTrio--GLM-4.7-AWQ/snapshots/"*/ 2>/dev/null | head -1 || true)
 FP8_TOKENIZER=$(ls -d "${HOME}/.cache/huggingface/hub/models--zai-org--GLM-4.7-FP8/snapshots/"*/ 2>/dev/null | head -1 || true)
 
@@ -88,33 +89,40 @@ if ! curl -sf "${SERVER_BASE}/v1/models" >/dev/null 2>&1; then
   exit 1
 fi
 
-# ── Start buster-ripper (strips max_gen_toks + empty auth, injects enable_thinking=false) ──
-fuser -k "${PROXY_PORT}/tcp" 2>/dev/null || true
-sleep 0.3
-
+# ── Proxy setup (buster-ripper or direct) ────────────────────────────────────
+NO_PROXY=${NO_PROXY:-0}
 PROXY_PID=""
 cleanup() { [[ -n "${PROXY_PID}" ]] && kill "${PROXY_PID}" 2>/dev/null || true; }
 trap cleanup EXIT
 
-THINKING_FLAG=""
-[[ "${EVAL_THINKING}" == "1" ]] && THINKING_FLAG="--eval-thinking"
+if [[ "${NO_PROXY}" == "1" ]]; then
+  PROXY_URL="${SERVER_BASE}"
+  BASE_URL="${SERVER_BASE}/v1/chat/completions"
+  echo "Direct mode: ${SERVER_BASE} (no buster-ripper)"
+else
+  fuser -k "${PROXY_PORT}/tcp" 2>/dev/null || true
+  sleep 0.3
 
-buster-ripper \
-  --upstream "${SERVER_BASE}" \
-  --port "${PROXY_PORT}" \
-  --host 127.0.0.1 \
-  --eval-mode \
-  --eval-profile "${EVAL_PROFILE:-glm47}" \
-  --eval-max-tokens "${EVAL_MAX_TOKENS}" \
-  ${THINKING_FLAG} \
-  >/tmp/buster-ripper-eval.log 2>&1 &
-PROXY_PID=$!
+  THINKING_FLAG=""
+  [[ "${EVAL_THINKING}" == "1" ]] && THINKING_FLAG="--eval-thinking"
 
-for i in $(seq 1 15); do
-  sleep 0.5
-  if curl -sf "${PROXY_URL}/v1/models" >/dev/null 2>&1; then break; fi
-done
-echo "buster-ripper listening on :${PROXY_PORT}"
+  buster-ripper \
+    --upstream "${SERVER_BASE}" \
+    --port "${PROXY_PORT}" \
+    --host 127.0.0.1 \
+    --eval-mode \
+    --eval-profile "${EVAL_PROFILE:-glm47}" \
+    --eval-max-tokens "${EVAL_MAX_TOKENS}" \
+    ${THINKING_FLAG} \
+    >/tmp/buster-ripper-eval.log 2>&1 &
+  PROXY_PID=$!
+
+  for i in $(seq 1 15); do
+    sleep 0.5
+    if curl -sf "${PROXY_URL}/v1/models" >/dev/null 2>&1; then break; fi
+  done
+  echo "buster-ripper listening on :${PROXY_PORT}"
+fi
 
 # ── Run ───────────────────────────────────────────────────────────────────────
 LIMIT_FLAG=""
@@ -124,9 +132,20 @@ fi
 
 # humaneval/mbpp execute model-generated code — required opt-in
 export HF_ALLOW_CODE_EVAL=1
-# All datasets cached locally — no network needed
-export HF_DATASETS_OFFLINE=1
-export HF_HUB_OFFLINE=1
+# Allow dataset download on first run, then cache locally
+export HF_DATASETS_OFFLINE=0
+export HF_HUB_OFFLINE=0
+
+# Pre-cache datasets so lm_eval doesn't fail in offline mode
+echo "Pre-caching datasets..."
+~/.local/share/uv/tools/lm-eval/bin/python -c "
+import datasets
+for ds_name in ['openai/openai_humaneval', 'google-research-datasets/mbpp']:
+    try:
+        datasets.load_dataset(ds_name, trust_remote_code=True)
+    except Exception:
+        pass
+" 2>/dev/null
 
 echo "GLM-4.7 quality eval — ${LABEL} — $(date '+%Y-%m-%d %H:%M')"
 echo "Server:    ${SERVER_BASE} (via proxy :${PROXY_PORT})  Model: ${MODEL}"
