@@ -23,16 +23,17 @@ TP=${TP:-4}
 DTYPE=${DTYPE:-bfloat16}
 QUANTIZATION=${QUANTIZATION:-modelopt_fp4}
 SERVED_MODEL_NAME=${SERVED_MODEL_NAME:-claude-opus-4-5-20251001}
-MAX_RUNNING_REQUESTS=${MAX_RUNNING_REQUESTS:-16}
+MAX_RUNNING_REQUESTS=${MAX_RUNNING_REQUESTS:-32}
 MEM_FRACTION=${MEM_FRACTION:-0.80}
-CUDA_GRAPH_MAX_BS=${CUDA_GRAPH_MAX_BS:-8}
-KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-bf16}
+CUDA_GRAPH_MAX_BS=${CUDA_GRAPH_MAX_BS:-64}
+KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-fp8_e4m3}
 GPU_POWER_LIMIT=${GPU_POWER_LIMIT:-270}
 # Speculative decoding: 1=on (NEXTN 4-step), 0=off
 SPEC=${SPEC:-1}
 MOE_RUNNER_BACKEND=${MOE_RUNNER_BACKEND:-b12x}
 FP4_GEMM_BACKEND=${FP4_GEMM_BACKEND:-b12x}
 ATTENTION_BACKEND=${ATTENTION_BACKEND:-flashinfer}
+CONTEXT_LENGTH=${CONTEXT_LENGTH:-200000}
 
 # ── Model path ────────────────────────────────────────────────────────────────
 MODEL_CACHE_DIR=""
@@ -89,7 +90,7 @@ _sep
 _line "Model:       ${MODEL_CACHE_DIR}"
 _line "Snapshot:    ${SNAPSHOT_REL}"
 _line "Container:   ${CONTAINER_NAME}    Port: ${PORT}"
-_line "TP: ${TP}   Mem: ${MEM_FRACTION}   Max running: ${MAX_RUNNING_REQUESTS}   CUDA graphs: max_bs=${CUDA_GRAPH_MAX_BS}"
+_line "TP: ${TP}   Mem: ${MEM_FRACTION}   Max running: ${MAX_RUNNING_REQUESTS}   Ctx: ${CONTEXT_LENGTH}"
 _line "KV cache:    ${KV_CACHE_DTYPE}   Quant: ${QUANTIZATION}"
 _line "Backends:    MoE=${MOE_RUNNER_BACKEND}  FP4=${FP4_GEMM_BACKEND}  Attn=${ATTENTION_BACKEND}"
 _line "Chunked prefill: 4096   Spec: SPEC=${SPEC} (1=NEXTN 4-step, 0=off)"
@@ -143,6 +144,7 @@ docker run -d \
   --cuda-graph-max-bs "${CUDA_GRAPH_MAX_BS}" \
   --max-running-requests "${MAX_RUNNING_REQUESTS}" \
   --chunked-prefill-size 4096 \
+  --context-length "${CONTEXT_LENGTH}" \
   --mem-fraction-static "${MEM_FRACTION}" \
   --host 0.0.0.0 --port "${PORT}" \
   --disable-custom-all-reduce \

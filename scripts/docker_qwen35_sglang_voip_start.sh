@@ -113,7 +113,7 @@ docker run -d \
   --quantization modelopt_fp4 \
   --kv-cache-dtype fp8_e4m3 \
   --trust-remote-code \
-  --cuda-graph-max-bs 16 \
+  --cuda-graph-max-bs 8 \
   --max-running-requests 16 \
   --chunked-prefill-size 4096 \
   --mamba-scheduler-strategy extra_buffer \

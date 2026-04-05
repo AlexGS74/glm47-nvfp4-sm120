@@ -158,7 +158,6 @@ docker run -d \
   --reasoning-parser glm45 \
   --enable-auto-tool-choice \
   --trust-remote-code \
-  --moe-backend cutlass \
   ${SPEC_FLAGS}"
 
 echo ""

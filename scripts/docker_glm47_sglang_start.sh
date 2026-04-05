@@ -24,7 +24,7 @@ QUANTIZATION=${QUANTIZATION:-modelopt_fp4}
 SERVED_MODEL_NAME=${SERVED_MODEL_NAME:-claude-opus-4-5-20251001}
 MAX_RUNNING_REQUESTS=${MAX_RUNNING_REQUESTS:-16}
 MEM_FRACTION=${MEM_FRACTION:-0.90}
-CUDA_GRAPH_MAX_BS=${CUDA_GRAPH_MAX_BS:-16}
+CUDA_GRAPH_MAX_BS=${CUDA_GRAPH_MAX_BS:-8}
 KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-bf16}
 GPU_POWER_LIMIT=${GPU_POWER_LIMIT:-270}
 MOE_RUNNER_BACKEND=${MOE_RUNNER_BACKEND:-flashinfer_cutlass}
@@ -94,8 +94,11 @@ docker run -d \
   -e NCCL_CUMEM_HOST_ENABLE=0 \
   -e OMP_NUM_THREADS=8 \
   -e SAFETENSORS_FAST_GPU=1 \
+  -e TORCHINDUCTOR_CACHE_DIR=/root/.cache/torch/inductor \
   -v "${MODEL_CACHE_DIR}:/model" \
   -v "${HOME}/.cache/flashinfer:/root/.cache/flashinfer" \
+  -v "/data/cache/torch:/root/.cache/torch" \
+  -v "/data/cache/triton:/root/.cache/triton" \
   "${IMAGE}" \
   python -m sglang.launch_server \
   --model-path "${MODEL_CONTAINER_PATH}" \
@@ -107,11 +110,10 @@ docker run -d \
   --kv-cache-dtype "${KV_CACHE_DTYPE}" \
   --chat-template "${MODEL_CONTAINER_PATH}/chat_template.jinja" \
   --tool-call-parser glm47 \
-  --reasoning-parser glm45 \
+  --reasoning-parser deepseek-r1 \
   --quantization "${QUANTIZATION}" \
   --dtype "${DTYPE}" \
   --disable-custom-all-reduce \
-  --enable-flashinfer-allreduce-fusion \
   --mem-fraction-static "${MEM_FRACTION}" \
   --cuda-graph-max-bs "${CUDA_GRAPH_MAX_BS}" \
   --host 0.0.0.0 \
@@ -121,7 +123,7 @@ docker run -d \
   --chunked-prefill-size 512 \
   --model-loader-extra-config '{"enable_multithread_load": true, "num_threads": 8}' \
   --enable-torch-compile \
-  --enable-hierarchical-cache --hicache-ratio 5 \
+  --enable-hierarchical-cache --hicache-ratio 2 \
   --sleep-on-idle \
   --enable-metrics
 

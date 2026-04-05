@@ -25,6 +25,10 @@ if [[ -z "${TOKENIZER_PATH:-}" ]]; then
       TOKENIZER_PATH=${TOKENIZER_PATH:-$(ls -d "${HOME}/.cache/huggingface/models--QuantTrio--GLM-4.7-AWQ/snapshots/"*/ 2>/dev/null | head -1 || true)}
       TOKENIZER_PATH=${TOKENIZER_PATH:-$(ls -d "${HOME}/.cache/huggingface/hub/models--zai-org--GLM-4.7-FP8/snapshots/"*/ 2>/dev/null | head -1 || true)}
       ;;
+    glm-nv|glm47-nv)
+      TOKENIZER_PATH=$(ls -d /data/huggingface/hub/models--nvidia--GLM-4.7-NVFP4/snapshots/*/ 2>/dev/null | head -1 || true)
+      TOKENIZER_PATH=${TOKENIZER_PATH:-$(ls -d "${HOME}/.cache/huggingface/hub/models--nvidia--GLM-4.7-NVFP4/snapshots/"*/ 2>/dev/null | head -1 || true)}
+      ;;
     *)
       echo "Usage: $0 <qwen|glm>" >&2
       echo "  Or set TOKENIZER_PATH directly." >&2
