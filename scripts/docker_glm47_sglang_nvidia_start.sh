@@ -28,8 +28,8 @@ MEM_FRACTION=${MEM_FRACTION:-0.80}
 CUDA_GRAPH_MAX_BS=${CUDA_GRAPH_MAX_BS:-64}
 KV_CACHE_DTYPE=${KV_CACHE_DTYPE:-fp8_e4m3}
 GPU_POWER_LIMIT=${GPU_POWER_LIMIT:-270}
-# Speculative decoding: 1=on (NEXTN 4-step), 0=off
-SPEC=${SPEC:-1}
+# Speculative decoding: eagle=EAGLE 3-step, mtp=NEXTN 4-step, off=disabled
+SPEC=${SPEC:-eagle}
 MOE_RUNNER_BACKEND=${MOE_RUNNER_BACKEND:-b12x}
 FP4_GEMM_BACKEND=${FP4_GEMM_BACKEND:-b12x}
 ATTENTION_BACKEND=${ATTENTION_BACKEND:-flashinfer}
@@ -74,9 +74,23 @@ sudo -n nvidia-smi -pl "${GPU_POWER_LIMIT}" -i 0,1,2,3 2>/dev/null \
   || echo "WARNING: could not set GPU power limit" >&2
 
 SPEC_ARGS=""
-if [[ "${SPEC}" -gt 0 ]]; then
-  SPEC_ARGS="--speculative-algo NEXTN --speculative-num-steps 4 --speculative-eagle-topk 1 --speculative-num-draft-tokens 6"
-fi
+case "${SPEC}" in
+  eagle)
+    SPEC_ARGS="--speculative-algorithm EAGLE --speculative-num-steps 3 --speculative-eagle-topk 1 --speculative-num-draft-tokens 4"
+    SPEC_LABEL="EAGLE 3-step, topk=1, draft=4"
+    ;;
+  mtp)
+    SPEC_ARGS="--speculative-algo NEXTN --speculative-num-steps 4 --speculative-eagle-topk 1 --speculative-num-draft-tokens 6"
+    SPEC_LABEL="NEXTN 4-step, topk=1, draft=6"
+    ;;
+  off|0)
+    SPEC_ARGS=""
+    SPEC_LABEL="disabled"
+    ;;
+  *)
+    echo "ERROR: SPEC must be eagle, mtp, or off (got: ${SPEC})" >&2; exit 1
+    ;;
+esac
 
 _W=78  # inner width between │ chars
 _HR=$(printf '%0.s─' $(seq 1 $((_W+1))))  # _W+1 dashes: space + content
@@ -93,7 +107,7 @@ _line "Container:   ${CONTAINER_NAME}    Port: ${PORT}"
 _line "TP: ${TP}   Mem: ${MEM_FRACTION}   Max running: ${MAX_RUNNING_REQUESTS}   Ctx: ${CONTEXT_LENGTH}"
 _line "KV cache:    ${KV_CACHE_DTYPE}   Quant: ${QUANTIZATION}"
 _line "Backends:    MoE=${MOE_RUNNER_BACKEND}  FP4=${FP4_GEMM_BACKEND}  Attn=${ATTENTION_BACKEND}"
-_line "Chunked prefill: 4096   Spec: SPEC=${SPEC} (1=NEXTN 4-step, 0=off)"
+_line "Chunked prefill: 4096   Spec: ${SPEC_LABEL}"
 _line "NCCL:        P2P=SYS  IB=off  LL_BUFFERS=1  MIN_CH=8"
 _line "Env:         TF32=1  OMP_THREADS=8  SAFETENSORS_FAST=1"
 _line "Flags:       --disable-custom-all-reduce --enable-metrics"
