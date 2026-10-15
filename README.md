@@ -136,6 +136,7 @@ The patch to `glm4_moe.py` lives inside the vLLM install and is lost on reinstal
 
 ## Docs
 
+- [`docs/qwen38-flash-next-tp2.md`](docs/qwen38-flash-next-tp2.md) — Qwen3.8-Flash-Next TP2/DCP1/MTP3 recipe (karmic-kraken image, 1M context)
 - [`docs/vllm-sm120-nvfp4-working-state.md`](docs/vllm-sm120-nvfp4-working-state.md) — full vLLM working state, errors encountered, startup sequence, benchmark results
 - [`docs/sm120-blackwell-fp4-fixes.md`](docs/sm120-blackwell-fp4-fixes.md) — SGLang investigation report, flashinfer regression history, upstream issue tracking
 - [`docs/quickstart.md`](docs/quickstart.md) — fast path to serving + benchmarking + quality evals
